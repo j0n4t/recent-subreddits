@@ -1,0 +1,12 @@
+{
+  "name": "correct-reddit",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Userscript: recently visited subreddits in a popup anchored to the Reddit logo",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/unit/*.test.mjs\"",
+    "test:e2e": "node --test \"tests/e2e/*.test.mjs\"",
+    "test:all": "npm test && npm run test:e2e"
+  }
+}

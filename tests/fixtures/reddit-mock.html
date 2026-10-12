@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reddit mock</title>
+</head>
+<body>
+  <!--
+    Local stand-in for reddit.com. Mimics only the markup the userscript anchors
+    to. Seed data and icon latency come in via the query string so each test gets
+    a fresh, isolated page without touching disk.
+
+      ?seed=<base64 utf8 JSON>   initial GM store value for "recentSubreddits"
+      ?iconDelay=<ms>            latency of the stubbed icon fetch
+  -->
+  <header id="site-header">
+    <a href="/" id="logo" data-testid="top-nav-logo"><span id="logo-glyph">R</span></a>
+    <button id="menu-btn" aria-label="Open menu">menu</button>
+  </header>
+  <main id="content">mock page body</main>
+
+  <script>
+  (() => {
+    const params = new URLSearchParams(location.search);
+    const seed = params.get('seed');
+    const iconDelay = Number(params.get('iconDelay') || 5);
+
+    const store = {};
+    if (seed) {
+      const bin = atob(seed);
+      const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      store.recentSubreddits = new TextDecoder().decode(bytes);
+    }
+
+    window.__store = store;
+    window.__xhrCalls = [];
+    window.__errors = [];
+
+    // Collected for the whole run: a handler that throws part-way aborts the rest
+    // of itself and presents as "nothing updated" rather than as a crash.
+    window.addEventListener('error', (e) => window.__errors.push(String(e.message)));
+    window.addEventListener('unhandledrejection', (e) =>
+      window.__errors.push('unhandledrejection: ' + String(e.reason)));
+
+    // --- GM_* stubs: the userscript's only outside surface ---
+    window.GM_getValue = (k, d) => (k in window.__store ? window.__store[k] : d);
+    window.GM_setValue = (k, v) => { window.__store[k] = v; };
+
+    window.GM_xmlhttpRequest = (opts) => {
+      window.__xhrCalls.push(opts.url);
+      const m = String(opts.url).match(/\/r\/([^/]+)\/about\.json/);
+      const name = m ? decodeURIComponent(m[1]) : 'unknown';
+      setTimeout(() => {
+        try {
+          opts.onload({
+            responseText: JSON.stringify({
+              data: { icon_img: 'https://icons.test/' + name + '.png', community_icon: '' },
+            }),
+          });
+        } catch (err) {
+          window.__errors.push('xhr onload: ' + err.message);
+        }
+      }, iconDelay);
+    };
+  })();
+  </script>
+  <!-- the REAL script under test, not a copy -->
+  <script src="../../recent-subreddits.user.js"></script>
+</body>
+</html>
