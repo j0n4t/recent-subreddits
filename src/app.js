@@ -1,20 +1,18 @@
-// The UI: everything that touches the DOM, plus init().
-import { parseHotkey, hotkeyMatches, comboFromEvent } from './hotkey.js';
-import { formatTimeAgo } from './time.js';
+// The UI shell: mounting, popup visibility, triggers, inline instances, init.
+import { parseHotkey, hotkeyMatches } from './hotkey.js';
 import {
   loadData,
   loadSettings,
   saveSettings,
   hookTargets,
-  DEFAULT_SETTINGS,
 } from './storage.js';
 
-import { startPicker } from './picker.js';
-import { escAttr, cachedIcon, fetchSubredditIcon } from './icons.js';
 import { TRIGGER_SELECTOR, checkTriggers } from './diagnostics.js';
 import { injectStyles } from './styles.js';
 import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore } from './visits.js';
 import { positionPopup, positionPopupCentered } from './position.js';
+import { renderContent as renderContentInto } from './content.js';
+import { renderSettingsPanel } from './settings-panel.js';
 
 // ---------- Build sidebar element ----------
 // Header label per view: icon + title, swapped when the settings panel opens.
@@ -26,6 +24,25 @@ let settingsOpen = false;
 
 function isSettingsOpen() {
   return settingsOpen;
+}
+
+/**
+ * The surface the settings panel needs from the mount layer. Passed in as an
+ * object rather than imported, because the mount layer imports the panel —
+ * a direct import back would be a cycle.
+ */
+const panelCtl = {
+  rerender: (host) => renderSettings(host),
+  setSettingsOpen: (open, instance) => setSettingsOpen(open, instance),
+  isPopupVisible: () => isPopupVisible(),
+  togglePopup: (show, trigger) => togglePopup(show, trigger),
+  applyTargets: () => applyTargets(),
+  setActiveHotkey: (combo) => { activeHotkey = combo; },
+};
+
+/** Render the settings view into one instance (the popup by default). */
+function renderSettings(instance) {
+  renderSettingsPanel(instance || popupEl, panelCtl);
 }
 
 /** Re-render the list inside every mounted inline block. */
@@ -97,279 +114,9 @@ function buildPopupShell() {
   return popup;
 }
 
-/**
- * Render the recent/pinned list into one instance's content slot.
- * `instance` defaults to the popup; an inline target passes its own node.
- */
+/** The list renders into whichever instance is given; the popup by default. */
 function renderContent(data, instance) {
-  const host = instance || popupEl;
-  if (!host) return;
-
-  const content = host.querySelector('.rs-content');
-  if (!content) return;
-
-  const { recent, pinned } = data;
-
-  let html = '';
-
-  if (pinned.length > 0) {
-    html += '<div class="rs-section rs-pinned-section">';
-    html += '<div class="rs-section-title">📌 Pinned</div>';
-    html += '<ul class="rs-list">';
-    for (const name of pinned) {
-      const icon = cachedIcon(name);
-      html += `<li class="rs-item rs-pinned">`;
-      html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(name))}" src="${escAttr(icon)}" alt="" />`;
-      html += `<a href="/r/${encodeURIComponent(name)}" class="rs-link">r/${name}</a>`;
-      html += `<button class="rs-unpin-btn" data-name="${escAttr(encodeURIComponent(name))}" title="Unpin">✕</button>`;
-      html += `</li>`;
-    }
-    html += '</ul></div>';
-  }
-
-  const recentFiltered = recent.filter((s) => !pinned.includes(s.name));
-
-  if (recentFiltered.length > 0) {
-    html += '<div class="rs-section">';
-    html += '<div class="rs-section-title">🕐 Recent</div>';
-    html += '<ul class="rs-list">';
-    for (const sub of recentFiltered) {
-      const timeAgo = formatTimeAgo(sub.visitedAt);
-      const icon = cachedIcon(sub.name);
-      html += `<li class="rs-item">`;
-      html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(sub.name))}" src="${escAttr(icon)}" alt="" />`;
-      html += `<a href="/r/${encodeURIComponent(sub.name)}" class="rs-link">r/${sub.name}</a>`;
-      html += `<span class="rs-time">${timeAgo}</span>`;
-      html += `<button class="rs-pin-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Pin">📌</button>`;
-      html += `</li>`;
-    }
-    html += '</ul></div>';
-  } else if (pinned.length === 0) {
-    html += '<div class="rs-empty">No subreddits visited yet.</div>';
-  }
-
-  content.innerHTML = html;
-
-  // Fetch icons for any entries missing one. fetchSubredditIcon() no-ops for a
-  // name already cached, so no guard is needed here.
-  [...pinned, ...recentFiltered.map((s) => s.name)].forEach((name) => {
-    fetchSubredditIcon(name, () => !!sidebarEl);
-  });
-}
-
-/**
- * Render the settings panel body into one instance's settings slot.
- * `instance` defaults to the popup; an inline target passes its own node.
- */
-function renderSettings(instance) {
-  const host = instance || popupEl;
-  if (!host) return;
-  const panel = host.querySelector('.rs-settings-panel');
-  if (!panel) return;
-
-  const settings = loadSettings();
-
-  const modeOptions = (selected) =>
-    [
-      ['hook', 'Hook (open popup)'],
-      ['replace', 'Replace element'],
-      ['prepend', 'Prepend inside'],
-      ['append', 'Append inside'],
-    ]
-      .map(
-        ([value, label]) =>
-          `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`
-      )
-      .join('');
-
-  const eventOptions = (selected) =>
-    [
-      ['both', 'Hover + click'],
-      ['hover', 'Hover only'],
-      ['click', 'Click only'],
-    ]
-      .map(
-        ([value, label]) =>
-          `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`
-      )
-      .join('');
-
-  const targetRows = settings.targets.length
-    ? settings.targets
-      .map((t, i) => {
-        // Events only mean something for a hook target.
-        const eventsCell =
-          t.mode === 'hook'
-            ? `<select class="rs-select" data-role="events" data-index="${i}">${eventOptions(t.events)}</select>`
-            : `<span class="rs-muted">—</span>`;
-        return `
-            <li class="rs-target">
-              <code class="rs-target-sel" title="${escAttr(t.selector)}">${escAttr(t.selector)}</code>
-              <div class="rs-target-controls">
-                <select class="rs-select" data-role="mode" data-index="${i}">${modeOptions(t.mode)}</select>
-                ${eventsCell}
-                <button class="rs-icon-btn" data-role="remove" data-index="${i}" title="Remove">✕</button>
-              </div>
-            </li>`;
-      })
-      .join('')
-    : '<li class="rs-empty">No page targets yet.</li>';
-
-  panel.innerHTML = `
-    <div class="rs-field">
-      <label class="rs-label">Open popup hotkey</label>
-      <input class="rs-input rs-hotkey-input" type="text" readonly
-             value="${escAttr(settings.hotkey)}"
-             placeholder="Click and press a combination" />
-      <div class="rs-hint">Click the field, then press the keys you want.
-        Use at least one modifier (Ctrl / Alt / Shift / Meta).</div>
-    </div>
-
-    <div class="rs-field">
-      <div class="rs-label-row">
-        <label class="rs-label">Page targets</label>
-        <button class="rs-btn rs-btn-small" data-role="pick">Pick element…</button>
-      </div>
-      <div class="rs-hint">Pick an element on the page, then choose what it does.
-        A hook opens the popup; the others render the list inline there.</div>
-      <ul class="rs-targets">${targetRows}</ul>
-    </div>
-
-    <div class="rs-status"></div>
-    <div class="rs-actions">
-      <button class="rs-btn" data-role="reset">Reset to default</button>
-      <button class="rs-btn rs-btn-primary" data-role="done">Done</button>
-    </div>
-  `;
-
-  const input = panel.querySelector('.rs-hotkey-input');
-
-  const say = (msg, kind) => {
-    // Re-query: renderSettings() rebuilds the panel, so a captured reference
-    // goes stale and the message would land on a detached node.
-    const el = panel.querySelector('.rs-status');
-    if (!el) return;
-    el.textContent = msg;
-    el.className = 'rs-status ' + (kind === 'error' ? 'rs-status-error' : 'rs-status-ok');
-  };
-
-  // Capture the combination: the field is readonly so nothing is typed into it,
-  // and the whole keydown is consumed so the host page never sees it.
-  input.addEventListener('keydown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (e.key === 'Escape') {
-      input.blur();
-      return;
-    }
-
-    const combo = comboFromEvent(e);
-    if (!combo) {
-      say('Press a key along with at least one modifier.', 'error');
-      return;
-    }
-
-    // Require a modifier: a bare letter would fire while the user is typing in
-    // Reddit's own search box.
-    if (!e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
-      say('Add a modifier (Ctrl / Alt / Shift / Meta).', 'error');
-      return;
-    }
-
-    const next = { ...loadSettings(), hotkey: combo };
-    saveSettings(next);
-    input.value = combo;
-    activeHotkey = parseHotkey(combo);
-    // Release focus: while the field is focused the global handler ignores
-    // keydown (the field owns the keys), so leaving it focused would make the
-    // hotkey appear not to work until the user clicked elsewhere.
-    input.blur();
-    say(`Saved — press ${combo} to open the popup.`);
-  });
-
-  // ---- Target list ----
-  // `host` (declared above) is the instance whose panel is being edited.
-  // Settings can be opened from the popup OR from an inline block, so every
-  // write re-renders that same host rather than assuming the popup.
-
-  const updateTarget = (index, patch) => {
-    const s = loadSettings();
-    if (!s.targets[index]) return;
-    Object.assign(s.targets[index], patch);
-    saveSettings(s);
-    renderSettings(host);
-    // A mode change alters the row's controls, so the instance is rebuilt.
-    if ('mode' in patch) applyTargets();
-    const sel = panel.querySelector(`[data-role="mode"][data-index="${index}"]`);
-    if (sel && 'mode' in patch) sel.focus();
-  };
-
-  panel.querySelector('[data-role="pick"]').addEventListener('click', (e) => {
-    e.stopPropagation();
-    // Close the popup so the whole page is pickable, then re-open settings after.
-    const wasOpen = isPopupVisible();
-    if (wasOpen) togglePopup(false);
-
-    startPicker(
-      (selector) => {
-        // onEnd() has already restored the UI by the time this runs.
-        const s = loadSettings();
-        if (s.targets.some((t) => t.selector === selector)) {
-          // Re-picking an element that is already configured is a no-op.
-          say('That element is already in the list.', 'error');
-          return;
-        }
-        s.targets.push({ selector, mode: 'hook', events: 'both' });
-        saveSettings(s);
-        renderSettings(host);
-        say(`Added ${selector}`);
-      },
-      () => {
-        // Cancelled (Esc) or finished: bring the UI back either way.
-        setSettingsOpen(true);
-        if (wasOpen) togglePopup(true);
-      }
-    );
-  });
-
-  panel.querySelector('.rs-targets').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-role="remove"]');
-    if (!btn) return;
-    e.stopPropagation();
-    const s = loadSettings();
-    s.targets.splice(Number(btn.dataset.index), 1);
-    saveSettings(s);
-    renderSettings(host);
-    // A removed target may have been an inline one — tear its block down.
-    applyTargets();
-    say('Target removed.');
-  });
-
-  panel.querySelector('.rs-targets').addEventListener('change', (e) => {
-    const sel = e.target.closest('[data-role="mode"], [data-role="events"]');
-    if (!sel) return;
-    e.stopPropagation();
-    const index = Number(sel.dataset.index);
-    const role = sel.dataset.role;
-    updateTarget(index, role === 'mode' ? { mode: sel.value } : { events: sel.value });
-    say('Target updated.');
-  });
-
-  panel.querySelector('[data-role="reset"]').addEventListener('click', (e) => {
-    e.stopPropagation();
-    saveSettings({ ...DEFAULT_SETTINGS });
-    activeHotkey = parseHotkey(DEFAULT_SETTINGS.hotkey);
-    // Reset clears the targets too, so the inline blocks must go.
-    applyTargets();
-    renderSettings(host);
-    say(`Reset to ${DEFAULT_SETTINGS.hotkey}.`);
-  });
-
-  panel.querySelector('[data-role="done"]').addEventListener('click', (e) => {
-    e.stopPropagation();
-    setSettingsOpen(false);
-  });
+  renderContentInto(data, instance || popupEl, () => !!sidebarEl);
 }
 
 // ---------- Inline instances (replace / prepend / append) ----------

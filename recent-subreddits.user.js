@@ -51,18 +51,6 @@
     return parts.join("+");
   }
 
-  // src/time.js
-  function formatTimeAgo(timestamp) {
-    const seconds = Math.floor((Date.now() - timestamp) / 1e3);
-    if (seconds < 60) return "just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  }
-
   // src/storage.js
   var STORAGE_KEY = "recentSubreddits";
   var MAX_RECENT = 15;
@@ -127,212 +115,6 @@
       hookTargetsCache = loadSettings().targets.filter((t) => t.mode === "hook");
     }
     return hookTargetsCache;
-  }
-
-  // src/selector.js
-  function cssEscape(value) {
-    const s = String(value);
-    if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(s);
-    return s.replace(/[^a-zA-Z0-9_-]/g, (c) => "\\" + c);
-  }
-  function isUnique(selector) {
-    try {
-      return document.querySelectorAll(selector).length === 1;
-    } catch {
-      return false;
-    }
-  }
-  function buildSelector(el) {
-    if (!el || el.nodeType !== 1) return "";
-    if (el.id && isUnique("#" + cssEscape(el.id))) {
-      const id = "#" + cssEscape(el.id);
-      if (id.length < 80) return id;
-    }
-    const testId = el.getAttribute("data-testid");
-    if (testId) {
-      const sel = `[data-testid="${cssEscape(testId)}"]`;
-      if (isUnique(sel)) return sel;
-    }
-    const parts = [];
-    let node = el;
-    while (node && node.nodeType === 1 && node !== document.documentElement) {
-      let part = node.tagName.toLowerCase();
-      const parent = node.parentElement;
-      if (parent) {
-        const sameTag = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
-        if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
-      }
-      parts.unshift(part);
-      const candidate = parts.join(" > ");
-      if (isUnique(candidate)) return candidate;
-      node = parent;
-    }
-    return parts.join(" > ");
-  }
-
-  // src/picker.js
-  var PICKER_STYLE_ID = "rs-picker-styles";
-  var pickerActive = false;
-  var pickerBox = null;
-  var pickerHovered = null;
-  var pickerOnPick = null;
-  var pickerOnEnd = null;
-  function pickerHintEl() {
-    return document.getElementById("rs-picker-hint");
-  }
-  function pickerCleanup() {
-    const hint = pickerHintEl();
-    if (hint) hint.remove();
-    document.removeEventListener("mousemove", pickerMove, true);
-    document.removeEventListener("click", pickerClick, true);
-    document.removeEventListener("keydown", pickerKey, true);
-    document.removeEventListener("scroll", pickerMove, true);
-    if (pickerBox) {
-      pickerBox.remove();
-      pickerBox = null;
-    }
-    pickerActive = false;
-    if (pickerOnEnd) {
-      const done = pickerOnEnd;
-      pickerOnEnd = null;
-      done();
-    }
-  }
-  function pickerMove(e) {
-    if (!pickerActive) return;
-    const el = (
-      /** @type {Element} */
-      e.target
-    );
-    if (!el || el.nodeType !== 1) return;
-    if (el.closest("#rs-popup, .rs-inline-host, #rs-picker-hint")) return;
-    pickerHovered = el;
-    const rect = el.getBoundingClientRect();
-    const box = pickerBox;
-    box.style.display = "block";
-    box.style.top = rect.top + "px";
-    box.style.left = rect.left + "px";
-    box.style.width = rect.width + "px";
-    box.style.height = rect.height + "px";
-    const hint = pickerHintEl();
-    if (hint) {
-      hint.textContent = `${buildSelector(el)}  \u2014  click to use, Esc to cancel`;
-    }
-  }
-  function pickerClick(e) {
-    if (!pickerActive) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const el = pickerHovered;
-    const selector = el ? buildSelector(el) : "";
-    const onPick = pickerOnPick;
-    pickerCleanup();
-    if (selector && onPick) onPick(selector);
-  }
-  function pickerKey(e) {
-    if (!pickerActive) return;
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      pickerCleanup();
-    }
-  }
-  function startPicker(onPick, onEnd) {
-    if (pickerActive) pickerCleanup();
-    if (!document.getElementById(PICKER_STYLE_ID)) {
-      const style = document.createElement("style");
-      style.id = PICKER_STYLE_ID;
-      style.textContent = `
-      #rs-picker-box {
-        position: fixed;
-        z-index: 2147483646;
-        pointer-events: none;
-        /* border-box: the 2px border must not inflate the box past the
-           element's rect, or the outline sits 4px off the element it marks. */
-        box-sizing: border-box;
-        border: 2px solid #d93a00;
-        background: rgba(217,58,0,0.12);
-        border-radius: 2px;
-        display: none;
-      }
-      #rs-picker-hint {
-        position: fixed;
-        z-index: 2147483647;
-        left: 50%;
-        bottom: 16px;
-        transform: translateX(-50%);
-        max-width: 90vw;
-        padding: 6px 12px;
-        font: 12px/1.4 monospace;
-        color: #fff;
-        background: rgba(0,0,0,0.85);
-        border-radius: 4px;
-        pointer-events: none;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-    `;
-      document.head.appendChild(style);
-    }
-    const box = document.createElement("div");
-    box.id = "rs-picker-box";
-    document.body.appendChild(box);
-    const hint = document.createElement("div");
-    hint.id = "rs-picker-hint";
-    hint.textContent = "Hover an element and click it \u2014 Esc to cancel";
-    document.body.appendChild(hint);
-    pickerBox = box;
-    pickerHovered = null;
-    pickerOnPick = onPick;
-    pickerOnEnd = onEnd;
-    pickerActive = true;
-    document.addEventListener("mousemove", pickerMove, true);
-    document.addEventListener("click", pickerClick, true);
-    document.addEventListener("keydown", pickerKey, true);
-    document.addEventListener("scroll", pickerMove, true);
-  }
-
-  // src/icons.js
-  var DEFAULT_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%23b8b8b8'/%3E%3C/svg%3E";
-  var iconCache = {};
-  function escAttr(s) {
-    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-  }
-  function cachedIcon(name) {
-    return iconCache[name] || DEFAULT_ICON;
-  }
-  function updateIconInDom(name, icon, isMounted) {
-    if (!isMounted() || !icon) return;
-    const encoded = encodeURIComponent(name);
-    const icons = document.querySelectorAll("img.rs-icon");
-    icons.forEach((img) => {
-      if (img.dataset.name === encoded) img.src = icon;
-    });
-  }
-  function fetchSubredditIcon(name, isMounted) {
-    if (name in iconCache) return iconCache[name];
-    iconCache[name] = DEFAULT_ICON;
-    GM_xmlhttpRequest({
-      method: "GET",
-      url: `https://www.reddit.com/r/${encodeURIComponent(name)}/about.json`,
-      headers: { Accept: "application/json" },
-      onload(res) {
-        let icon = "";
-        try {
-          const data = JSON.parse(res.responseText);
-          icon = data.data?.icon_img || data.data?.community_icon || "";
-        } catch {
-        }
-        icon = icon.replace(/&amp;/g, "&");
-        iconCache[name] = icon || DEFAULT_ICON;
-        updateIconInDom(name, iconCache[name], isMounted);
-      },
-      onerror() {
-        iconCache[name] = DEFAULT_ICON;
-      }
-    });
-    return DEFAULT_ICON;
   }
 
   // src/diagnostics.js
@@ -842,63 +624,64 @@
     popup.style.top = top + "px";
   }
 
-  // src/app.js
-  var HEADER_TITLE = { main: "\u{1F4CB} Recent Subreddits", settings: "\u2699 Settings" };
-  var sidebarEl = null;
-  var popupEl = null;
-  var settingsOpen = false;
-  function isSettingsOpen() {
-    return settingsOpen;
+  // src/time.js
+  function formatTimeAgo(timestamp) {
+    const seconds = Math.floor((Date.now() - timestamp) / 1e3);
+    if (seconds < 60) return "just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
   }
-  function refreshInlineInstances(data) {
-    for (const rec of inlineInstances.values()) {
-      if (!document.body.contains(rec.host)) continue;
-      renderContent(data, rec.host.querySelector(".rs-inline"));
-    }
+
+  // src/icons.js
+  var DEFAULT_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%23b8b8b8'/%3E%3C/svg%3E";
+  var iconCache = {};
+  function escAttr(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   }
-  function refreshAll(data) {
-    renderContent(data);
-    refreshInlineInstances(data);
+  function cachedIcon(name) {
+    return iconCache[name] || DEFAULT_ICON;
   }
-  function togglePin2(name) {
-    togglePin(name, refreshAll);
+  function updateIconInDom(name, icon, isMounted) {
+    if (!isMounted() || !icon) return;
+    const encoded = encodeURIComponent(name);
+    const icons = document.querySelectorAll("img.rs-icon");
+    icons.forEach((img) => {
+      if (img.dataset.name === encoded) img.src = icon;
+    });
   }
-  function buildPopupShell() {
-    const popup = document.createElement("div");
-    popup.className = "recent-subreddits-popup rs-instance";
-    popup.id = "rs-popup";
-    const close = document.createElement("button");
-    close.className = "rs-close-btn";
-    close.id = "rs-close";
-    close.title = "Close";
-    close.textContent = "\u2715";
-    const header = document.createElement("div");
-    header.className = "rs-header-row";
-    const title = document.createElement("h3");
-    title.className = "rs-header";
-    title.textContent = HEADER_TITLE.main;
-    const back = document.createElement("button");
-    back.className = "rs-back-btn";
-    back.id = "rs-back";
-    back.title = "Back";
-    back.textContent = "\u2190";
-    const gear = document.createElement("button");
-    gear.className = "rs-settings-btn";
-    gear.id = "rs-settings";
-    gear.title = "Settings";
-    gear.textContent = "\u2699";
-    header.append(back, title, gear, close);
-    const content = document.createElement("div");
-    content.className = "rs-content";
-    const settings = document.createElement("div");
-    settings.className = "rs-settings-panel";
-    popup.append(header, content, settings);
-    return popup;
+  function fetchSubredditIcon(name, isMounted) {
+    if (name in iconCache) return iconCache[name];
+    iconCache[name] = DEFAULT_ICON;
+    GM_xmlhttpRequest({
+      method: "GET",
+      url: `https://www.reddit.com/r/${encodeURIComponent(name)}/about.json`,
+      headers: { Accept: "application/json" },
+      onload(res) {
+        let icon = "";
+        try {
+          const data = JSON.parse(res.responseText);
+          icon = data.data?.icon_img || data.data?.community_icon || "";
+        } catch {
+        }
+        icon = icon.replace(/&amp;/g, "&");
+        iconCache[name] = icon || DEFAULT_ICON;
+        updateIconInDom(name, iconCache[name], isMounted);
+      },
+      onerror() {
+        iconCache[name] = DEFAULT_ICON;
+      }
+    });
+    return DEFAULT_ICON;
   }
-  function renderContent(data, instance) {
-    const host = instance || popupEl;
-    if (!host) return;
-    const content = host.querySelector(".rs-content");
+
+  // src/content.js
+  function renderContent(data, instance, isMounted) {
+    if (!instance) return;
+    const content = instance.querySelector(".rs-content");
     if (!content) return;
     const { recent, pinned } = data;
     let html = "";
@@ -937,11 +720,177 @@
     }
     content.innerHTML = html;
     [...pinned, ...recentFiltered.map((s) => s.name)].forEach((name) => {
-      fetchSubredditIcon(name, () => !!sidebarEl);
+      fetchSubredditIcon(name, isMounted);
     });
   }
-  function renderSettings(instance) {
-    const host = instance || popupEl;
+
+  // src/selector.js
+  function cssEscape(value) {
+    const s = String(value);
+    if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(s);
+    return s.replace(/[^a-zA-Z0-9_-]/g, (c) => "\\" + c);
+  }
+  function isUnique(selector) {
+    try {
+      return document.querySelectorAll(selector).length === 1;
+    } catch {
+      return false;
+    }
+  }
+  function buildSelector(el) {
+    if (!el || el.nodeType !== 1) return "";
+    if (el.id && isUnique("#" + cssEscape(el.id))) {
+      const id = "#" + cssEscape(el.id);
+      if (id.length < 80) return id;
+    }
+    const testId = el.getAttribute("data-testid");
+    if (testId) {
+      const sel = `[data-testid="${cssEscape(testId)}"]`;
+      if (isUnique(sel)) return sel;
+    }
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === 1 && node !== document.documentElement) {
+      let part = node.tagName.toLowerCase();
+      const parent = node.parentElement;
+      if (parent) {
+        const sameTag = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
+        if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      const candidate = parts.join(" > ");
+      if (isUnique(candidate)) return candidate;
+      node = parent;
+    }
+    return parts.join(" > ");
+  }
+
+  // src/picker.js
+  var PICKER_STYLE_ID = "rs-picker-styles";
+  var pickerActive = false;
+  var pickerBox = null;
+  var pickerHovered = null;
+  var pickerOnPick = null;
+  var pickerOnEnd = null;
+  function pickerHintEl() {
+    return document.getElementById("rs-picker-hint");
+  }
+  function pickerCleanup() {
+    const hint = pickerHintEl();
+    if (hint) hint.remove();
+    document.removeEventListener("mousemove", pickerMove, true);
+    document.removeEventListener("click", pickerClick, true);
+    document.removeEventListener("keydown", pickerKey, true);
+    document.removeEventListener("scroll", pickerMove, true);
+    if (pickerBox) {
+      pickerBox.remove();
+      pickerBox = null;
+    }
+    pickerActive = false;
+    if (pickerOnEnd) {
+      const done = pickerOnEnd;
+      pickerOnEnd = null;
+      done();
+    }
+  }
+  function pickerMove(e) {
+    if (!pickerActive) return;
+    const el = (
+      /** @type {Element} */
+      e.target
+    );
+    if (!el || el.nodeType !== 1) return;
+    if (el.closest("#rs-popup, .rs-inline-host, #rs-picker-hint")) return;
+    pickerHovered = el;
+    const rect = el.getBoundingClientRect();
+    const box = pickerBox;
+    box.style.display = "block";
+    box.style.top = rect.top + "px";
+    box.style.left = rect.left + "px";
+    box.style.width = rect.width + "px";
+    box.style.height = rect.height + "px";
+    const hint = pickerHintEl();
+    if (hint) {
+      hint.textContent = `${buildSelector(el)}  \u2014  click to use, Esc to cancel`;
+    }
+  }
+  function pickerClick(e) {
+    if (!pickerActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = pickerHovered;
+    const selector = el ? buildSelector(el) : "";
+    const onPick = pickerOnPick;
+    pickerCleanup();
+    if (selector && onPick) onPick(selector);
+  }
+  function pickerKey(e) {
+    if (!pickerActive) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      pickerCleanup();
+    }
+  }
+  function startPicker(onPick, onEnd) {
+    if (pickerActive) pickerCleanup();
+    if (!document.getElementById(PICKER_STYLE_ID)) {
+      const style = document.createElement("style");
+      style.id = PICKER_STYLE_ID;
+      style.textContent = `
+      #rs-picker-box {
+        position: fixed;
+        z-index: 2147483646;
+        pointer-events: none;
+        /* border-box: the 2px border must not inflate the box past the
+           element's rect, or the outline sits 4px off the element it marks. */
+        box-sizing: border-box;
+        border: 2px solid #d93a00;
+        background: rgba(217,58,0,0.12);
+        border-radius: 2px;
+        display: none;
+      }
+      #rs-picker-hint {
+        position: fixed;
+        z-index: 2147483647;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        max-width: 90vw;
+        padding: 6px 12px;
+        font: 12px/1.4 monospace;
+        color: #fff;
+        background: rgba(0,0,0,0.85);
+        border-radius: 4px;
+        pointer-events: none;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    `;
+      document.head.appendChild(style);
+    }
+    const box = document.createElement("div");
+    box.id = "rs-picker-box";
+    document.body.appendChild(box);
+    const hint = document.createElement("div");
+    hint.id = "rs-picker-hint";
+    hint.textContent = "Hover an element and click it \u2014 Esc to cancel";
+    document.body.appendChild(hint);
+    pickerBox = box;
+    pickerHovered = null;
+    pickerOnPick = onPick;
+    pickerOnEnd = onEnd;
+    pickerActive = true;
+    document.addEventListener("mousemove", pickerMove, true);
+    document.addEventListener("click", pickerClick, true);
+    document.addEventListener("keydown", pickerKey, true);
+    document.addEventListener("scroll", pickerMove, true);
+  }
+
+  // src/settings-panel.js
+  function renderSettingsPanel(instance, ctl) {
+    const host = instance;
     if (!host) return;
     const panel = host.querySelector(".rs-settings-panel");
     if (!panel) return;
@@ -1025,7 +974,7 @@
       const next = { ...loadSettings(), hotkey: combo };
       saveSettings(next);
       input.value = combo;
-      activeHotkey = parseHotkey(combo);
+      ctl.setActiveHotkey(parseHotkey(combo));
       input.blur();
       say(`Saved \u2014 press ${combo} to open the popup.`);
     });
@@ -1034,15 +983,15 @@
       if (!s.targets[index]) return;
       Object.assign(s.targets[index], patch);
       saveSettings(s);
-      renderSettings(host);
-      if ("mode" in patch) applyTargets();
+      ctl.rerender(host);
+      if ("mode" in patch) ctl.applyTargets();
       const sel = panel.querySelector(`[data-role="mode"][data-index="${index}"]`);
       if (sel && "mode" in patch) sel.focus();
     };
     panel.querySelector('[data-role="pick"]').addEventListener("click", (e) => {
       e.stopPropagation();
-      const wasOpen = isPopupVisible();
-      if (wasOpen) togglePopup(false);
+      const wasOpen = ctl.isPopupVisible();
+      if (wasOpen) ctl.togglePopup(false);
       startPicker(
         (selector) => {
           const s = loadSettings();
@@ -1052,12 +1001,12 @@
           }
           s.targets.push({ selector, mode: "hook", events: "both" });
           saveSettings(s);
-          renderSettings(host);
+          ctl.rerender(host);
           say(`Added ${selector}`);
         },
         () => {
-          setSettingsOpen(true);
-          if (wasOpen) togglePopup(true);
+          ctl.setSettingsOpen(true);
+          if (wasOpen) ctl.togglePopup(true);
         }
       );
     });
@@ -1068,8 +1017,8 @@
       const s = loadSettings();
       s.targets.splice(Number(btn.dataset.index), 1);
       saveSettings(s);
-      renderSettings(host);
-      applyTargets();
+      ctl.rerender(host);
+      ctl.applyTargets();
       say("Target removed.");
     });
     panel.querySelector(".rs-targets").addEventListener("change", (e) => {
@@ -1084,15 +1033,85 @@
     panel.querySelector('[data-role="reset"]').addEventListener("click", (e) => {
       e.stopPropagation();
       saveSettings({ ...DEFAULT_SETTINGS });
-      activeHotkey = parseHotkey(DEFAULT_SETTINGS.hotkey);
-      applyTargets();
-      renderSettings(host);
+      ctl.setActiveHotkey(parseHotkey(DEFAULT_SETTINGS.hotkey));
+      ctl.applyTargets();
+      ctl.rerender(host);
       say(`Reset to ${DEFAULT_SETTINGS.hotkey}.`);
     });
     panel.querySelector('[data-role="done"]').addEventListener("click", (e) => {
       e.stopPropagation();
-      setSettingsOpen(false);
+      ctl.setSettingsOpen(false);
     });
+  }
+
+  // src/app.js
+  var HEADER_TITLE = { main: "\u{1F4CB} Recent Subreddits", settings: "\u2699 Settings" };
+  var sidebarEl = null;
+  var popupEl = null;
+  var settingsOpen = false;
+  function isSettingsOpen() {
+    return settingsOpen;
+  }
+  var panelCtl = {
+    rerender: (host) => renderSettings(host),
+    setSettingsOpen: (open, instance) => setSettingsOpen(open, instance),
+    isPopupVisible: () => isPopupVisible(),
+    togglePopup: (show, trigger) => togglePopup(show, trigger),
+    applyTargets: () => applyTargets(),
+    setActiveHotkey: (combo) => {
+      activeHotkey = combo;
+    }
+  };
+  function renderSettings(instance) {
+    renderSettingsPanel(instance || popupEl, panelCtl);
+  }
+  function refreshInlineInstances(data) {
+    for (const rec of inlineInstances.values()) {
+      if (!document.body.contains(rec.host)) continue;
+      renderContent2(data, rec.host.querySelector(".rs-inline"));
+    }
+  }
+  function refreshAll(data) {
+    renderContent2(data);
+    refreshInlineInstances(data);
+  }
+  function togglePin2(name) {
+    togglePin(name, refreshAll);
+  }
+  function buildPopupShell() {
+    const popup = document.createElement("div");
+    popup.className = "recent-subreddits-popup rs-instance";
+    popup.id = "rs-popup";
+    const close = document.createElement("button");
+    close.className = "rs-close-btn";
+    close.id = "rs-close";
+    close.title = "Close";
+    close.textContent = "\u2715";
+    const header = document.createElement("div");
+    header.className = "rs-header-row";
+    const title = document.createElement("h3");
+    title.className = "rs-header";
+    title.textContent = HEADER_TITLE.main;
+    const back = document.createElement("button");
+    back.className = "rs-back-btn";
+    back.id = "rs-back";
+    back.title = "Back";
+    back.textContent = "\u2190";
+    const gear = document.createElement("button");
+    gear.className = "rs-settings-btn";
+    gear.id = "rs-settings";
+    gear.title = "Settings";
+    gear.textContent = "\u2699";
+    header.append(back, title, gear, close);
+    const content = document.createElement("div");
+    content.className = "rs-content";
+    const settings = document.createElement("div");
+    settings.className = "rs-settings-panel";
+    popup.append(header, content, settings);
+    return popup;
+  }
+  function renderContent2(data, instance) {
+    renderContent(data, instance || popupEl, () => !!sidebarEl);
   }
   var inlineInstances = /* @__PURE__ */ new Map();
   var INLINE_MODES = ["replace", "prepend", "append"];
@@ -1168,7 +1187,7 @@
       inlineInstances.set(selector, rec);
       wireInlineInstance(rec, target);
     }
-    renderContent(loadData(), rec.host.querySelector(".rs-inline"));
+    renderContent2(loadData(), rec.host.querySelector(".rs-inline"));
   }
   function wireResizeHandle(rec, target) {
     const handle = rec.host.querySelector(".rs-resize-handle");
@@ -1310,7 +1329,7 @@
       popupEl = buildPopupShell();
       sidebarEl.appendChild(popupEl);
       activeHotkey = parseHotkey(loadSettings().hotkey);
-      renderContent(loadData());
+      renderContent2(loadData());
       applyTargets();
     } else {
       ensureMounted();
@@ -1399,7 +1418,7 @@
         if (subName) {
           trackVisit(subName);
         }
-        renderContent(loadData());
+        renderContent2(loadData());
         applyTargets();
         checkTriggers();
       }

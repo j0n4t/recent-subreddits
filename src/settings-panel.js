@@ -1,0 +1,225 @@
+// Settings panel
+//
+// The settings view: hotkey capture and the page-target list. It renders into
+// whichever instance opened it (the popup or an inline block), so the instance
+// and a small controller surface are passed in rather than closed over — that
+// keeps this module free of an import cycle with the mount code.
+import { loadSettings, saveSettings, DEFAULT_SETTINGS } from './storage.js';
+import { escAttr } from './icons.js';
+import { parseHotkey, comboFromEvent } from './hotkey.js';
+import { startPicker } from './picker.js';
+
+/**
+ * Render the settings panel body into one instance's settings slot.
+ * `instance` defaults to the popup; an inline target passes its own node.
+ */
+export function renderSettingsPanel(instance, ctl) {
+  const host = instance;
+  if (!host) return;
+  const panel = host.querySelector('.rs-settings-panel');
+  if (!panel) return;
+
+  const settings = loadSettings();
+
+  const modeOptions = (selected) =>
+    [
+      ['hook', 'Hook (open popup)'],
+      ['replace', 'Replace element'],
+      ['prepend', 'Prepend inside'],
+      ['append', 'Append inside'],
+    ]
+      .map(
+        ([value, label]) =>
+          `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`
+      )
+      .join('');
+
+  const eventOptions = (selected) =>
+    [
+      ['both', 'Hover + click'],
+      ['hover', 'Hover only'],
+      ['click', 'Click only'],
+    ]
+      .map(
+        ([value, label]) =>
+          `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`
+      )
+      .join('');
+
+  const targetRows = settings.targets.length
+    ? settings.targets
+      .map((t, i) => {
+        // Events only mean something for a hook target.
+        const eventsCell =
+          t.mode === 'hook'
+            ? `<select class="rs-select" data-role="events" data-index="${i}">${eventOptions(t.events)}</select>`
+            : `<span class="rs-muted">—</span>`;
+        return `
+            <li class="rs-target">
+              <code class="rs-target-sel" title="${escAttr(t.selector)}">${escAttr(t.selector)}</code>
+              <div class="rs-target-controls">
+                <select class="rs-select" data-role="mode" data-index="${i}">${modeOptions(t.mode)}</select>
+                ${eventsCell}
+                <button class="rs-icon-btn" data-role="remove" data-index="${i}" title="Remove">✕</button>
+              </div>
+            </li>`;
+      })
+      .join('')
+    : '<li class="rs-empty">No page targets yet.</li>';
+
+  panel.innerHTML = `
+    <div class="rs-field">
+      <label class="rs-label">Open popup hotkey</label>
+      <input class="rs-input rs-hotkey-input" type="text" readonly
+             value="${escAttr(settings.hotkey)}"
+             placeholder="Click and press a combination" />
+      <div class="rs-hint">Click the field, then press the keys you want.
+        Use at least one modifier (Ctrl / Alt / Shift / Meta).</div>
+    </div>
+
+    <div class="rs-field">
+      <div class="rs-label-row">
+        <label class="rs-label">Page targets</label>
+        <button class="rs-btn rs-btn-small" data-role="pick">Pick element…</button>
+      </div>
+      <div class="rs-hint">Pick an element on the page, then choose what it does.
+        A hook opens the popup; the others render the list inline there.</div>
+      <ul class="rs-targets">${targetRows}</ul>
+    </div>
+
+    <div class="rs-status"></div>
+    <div class="rs-actions">
+      <button class="rs-btn" data-role="reset">Reset to default</button>
+      <button class="rs-btn rs-btn-primary" data-role="done">Done</button>
+    </div>
+  `;
+
+  const input = panel.querySelector('.rs-hotkey-input');
+
+  const say = (msg, kind) => {
+    // Re-query: renderSettings() rebuilds the panel, so a captured reference
+    // goes stale and the message would land on a detached node.
+    const el = panel.querySelector('.rs-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'rs-status ' + (kind === 'error' ? 'rs-status-error' : 'rs-status-ok');
+  };
+
+  // Capture the combination: the field is readonly so nothing is typed into it,
+  // and the whole keydown is consumed so the host page never sees it.
+  input.addEventListener('keydown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === 'Escape') {
+      input.blur();
+      return;
+    }
+
+    const combo = comboFromEvent(e);
+    if (!combo) {
+      say('Press a key along with at least one modifier.', 'error');
+      return;
+    }
+
+    // Require a modifier: a bare letter would fire while the user is typing in
+    // Reddit's own search box.
+    if (!e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+      say('Add a modifier (Ctrl / Alt / Shift / Meta).', 'error');
+      return;
+    }
+
+    const next = { ...loadSettings(), hotkey: combo };
+    saveSettings(next);
+    input.value = combo;
+    ctl.setActiveHotkey(parseHotkey(combo));
+    // Release focus: while the field is focused the global handler ignores
+    // keydown (the field owns the keys), so leaving it focused would make the
+    // hotkey appear not to work until the user clicked elsewhere.
+    input.blur();
+    say(`Saved — press ${combo} to open the popup.`);
+  });
+
+  // ---- Target list ----
+  // `host` (declared above) is the instance whose panel is being edited.
+  // Settings can be opened from the popup OR from an inline block, so every
+  // write re-renders that same host rather than assuming the popup.
+
+  const updateTarget = (index, patch) => {
+    const s = loadSettings();
+    if (!s.targets[index]) return;
+    Object.assign(s.targets[index], patch);
+    saveSettings(s);
+    ctl.rerender(host);
+    // A mode change alters the row's controls, so the instance is rebuilt.
+    if ('mode' in patch) ctl.applyTargets();
+    const sel = panel.querySelector(`[data-role="mode"][data-index="${index}"]`);
+    if (sel && 'mode' in patch) sel.focus();
+  };
+
+  panel.querySelector('[data-role="pick"]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Close the popup so the whole page is pickable, then re-open settings after.
+    const wasOpen = ctl.isPopupVisible();
+    if (wasOpen) ctl.togglePopup(false);
+
+    startPicker(
+      (selector) => {
+        // onEnd() has already restored the UI by the time this runs.
+        const s = loadSettings();
+        if (s.targets.some((t) => t.selector === selector)) {
+          // Re-picking an element that is already configured is a no-op.
+          say('That element is already in the list.', 'error');
+          return;
+        }
+        s.targets.push({ selector, mode: 'hook', events: 'both' });
+        saveSettings(s);
+        ctl.rerender(host);
+        say(`Added ${selector}`);
+      },
+      () => {
+        // Cancelled (Esc) or finished: bring the UI back either way.
+        ctl.setSettingsOpen(true);
+        if (wasOpen) ctl.togglePopup(true);
+      }
+    );
+  });
+
+  panel.querySelector('.rs-targets').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-role="remove"]');
+    if (!btn) return;
+    e.stopPropagation();
+    const s = loadSettings();
+    s.targets.splice(Number(btn.dataset.index), 1);
+    saveSettings(s);
+    ctl.rerender(host);
+    // A removed target may have been an inline one — tear its block down.
+    ctl.applyTargets();
+    say('Target removed.');
+  });
+
+  panel.querySelector('.rs-targets').addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-role="mode"], [data-role="events"]');
+    if (!sel) return;
+    e.stopPropagation();
+    const index = Number(sel.dataset.index);
+    const role = sel.dataset.role;
+    updateTarget(index, role === 'mode' ? { mode: sel.value } : { events: sel.value });
+    say('Target updated.');
+  });
+
+  panel.querySelector('[data-role="reset"]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    saveSettings({ ...DEFAULT_SETTINGS });
+    ctl.setActiveHotkey(parseHotkey(DEFAULT_SETTINGS.hotkey));
+    // Reset clears the targets too, so the inline blocks must go.
+    ctl.applyTargets();
+    ctl.rerender(host);
+    say(`Reset to ${DEFAULT_SETTINGS.hotkey}.`);
+  });
+
+  panel.querySelector('[data-role="done"]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    ctl.setSettingsOpen(false);
+  });
+}
