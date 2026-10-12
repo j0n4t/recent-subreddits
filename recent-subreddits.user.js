@@ -889,7 +889,7 @@
   }
 
   // src/settings-panel.js
-  function renderSettingsPanel(instance, ctl) {
+  function renderSettingsPanel(instance, ctl2) {
     const host = instance;
     if (!host) return;
     const panel = host.querySelector(".rs-settings-panel");
@@ -974,7 +974,7 @@
       const next = { ...loadSettings(), hotkey: combo };
       saveSettings(next);
       input.value = combo;
-      ctl.setActiveHotkey(parseHotkey(combo));
+      ctl2.setActiveHotkey(parseHotkey(combo));
       input.blur();
       say(`Saved \u2014 press ${combo} to open the popup.`);
     });
@@ -983,15 +983,15 @@
       if (!s.targets[index]) return;
       Object.assign(s.targets[index], patch);
       saveSettings(s);
-      ctl.rerender(host);
-      if ("mode" in patch) ctl.applyTargets();
+      ctl2.rerender(host);
+      if ("mode" in patch) ctl2.applyTargets();
       const sel = panel.querySelector(`[data-role="mode"][data-index="${index}"]`);
       if (sel && "mode" in patch) sel.focus();
     };
     panel.querySelector('[data-role="pick"]').addEventListener("click", (e) => {
       e.stopPropagation();
-      const wasOpen = ctl.isPopupVisible();
-      if (wasOpen) ctl.togglePopup(false);
+      const wasOpen = ctl2.isPopupVisible();
+      if (wasOpen) ctl2.togglePopup(false);
       startPicker(
         (selector) => {
           const s = loadSettings();
@@ -1001,12 +1001,12 @@
           }
           s.targets.push({ selector, mode: "hook", events: "both" });
           saveSettings(s);
-          ctl.rerender(host);
+          ctl2.rerender(host);
           say(`Added ${selector}`);
         },
         () => {
-          ctl.setSettingsOpen(true);
-          if (wasOpen) ctl.togglePopup(true);
+          ctl2.setSettingsOpen(true);
+          if (wasOpen) ctl2.togglePopup(true);
         }
       );
     });
@@ -1017,8 +1017,8 @@
       const s = loadSettings();
       s.targets.splice(Number(btn.dataset.index), 1);
       saveSettings(s);
-      ctl.rerender(host);
-      ctl.applyTargets();
+      ctl2.rerender(host);
+      ctl2.applyTargets();
       say("Target removed.");
     });
     panel.querySelector(".rs-targets").addEventListener("change", (e) => {
@@ -1033,90 +1033,32 @@
     panel.querySelector('[data-role="reset"]').addEventListener("click", (e) => {
       e.stopPropagation();
       saveSettings({ ...DEFAULT_SETTINGS });
-      ctl.setActiveHotkey(parseHotkey(DEFAULT_SETTINGS.hotkey));
-      ctl.applyTargets();
-      ctl.rerender(host);
+      ctl2.setActiveHotkey(parseHotkey(DEFAULT_SETTINGS.hotkey));
+      ctl2.applyTargets();
+      ctl2.rerender(host);
       say(`Reset to ${DEFAULT_SETTINGS.hotkey}.`);
     });
     panel.querySelector('[data-role="done"]').addEventListener("click", (e) => {
       e.stopPropagation();
-      ctl.setSettingsOpen(false);
+      ctl2.setSettingsOpen(false);
     });
   }
 
-  // src/app.js
-  var HEADER_TITLE = { main: "\u{1F4CB} Recent Subreddits", settings: "\u2699 Settings" };
-  var sidebarEl = null;
-  var popupEl = null;
-  var settingsOpen = false;
-  function isSettingsOpen() {
-    return settingsOpen;
+  // src/inline.js
+  var ctl = null;
+  function initInline(shellCtl) {
+    ctl = shellCtl;
   }
-  var panelCtl = {
-    rerender: (host) => renderSettings(host),
-    setSettingsOpen: (open, instance) => setSettingsOpen(open, instance),
-    isPopupVisible: () => isPopupVisible(),
-    togglePopup: (show, trigger) => togglePopup(show, trigger),
-    applyTargets: () => applyTargets(),
-    setActiveHotkey: (combo) => {
-      activeHotkey = combo;
-    }
-  };
-  function renderSettings(instance) {
-    renderSettingsPanel(instance || popupEl, panelCtl);
-  }
-  function refreshInlineInstances(data) {
+  function refreshInline(data) {
     for (const rec of inlineInstances.values()) {
       if (!document.body.contains(rec.host)) continue;
-      renderContent2(data, rec.host.querySelector(".rs-inline"));
+      ctl.render(data, rec.host.querySelector(".rs-inline"));
     }
-  }
-  function refreshAll(data) {
-    renderContent2(data);
-    refreshInlineInstances(data);
-  }
-  function togglePin2(name) {
-    togglePin(name, refreshAll);
-  }
-  function buildPopupShell() {
-    const popup = document.createElement("div");
-    popup.className = "recent-subreddits-popup rs-instance";
-    popup.id = "rs-popup";
-    const close = document.createElement("button");
-    close.className = "rs-close-btn";
-    close.id = "rs-close";
-    close.title = "Close";
-    close.textContent = "\u2715";
-    const header = document.createElement("div");
-    header.className = "rs-header-row";
-    const title = document.createElement("h3");
-    title.className = "rs-header";
-    title.textContent = HEADER_TITLE.main;
-    const back = document.createElement("button");
-    back.className = "rs-back-btn";
-    back.id = "rs-back";
-    back.title = "Back";
-    back.textContent = "\u2190";
-    const gear = document.createElement("button");
-    gear.className = "rs-settings-btn";
-    gear.id = "rs-settings";
-    gear.title = "Settings";
-    gear.textContent = "\u2699";
-    header.append(back, title, gear, close);
-    const content = document.createElement("div");
-    content.className = "rs-content";
-    const settings = document.createElement("div");
-    settings.className = "rs-settings-panel";
-    popup.append(header, content, settings);
-    return popup;
-  }
-  function renderContent2(data, instance) {
-    renderContent(data, instance || popupEl, () => !!sidebarEl);
   }
   var inlineInstances = /* @__PURE__ */ new Map();
   var INLINE_MODES = ["replace", "prepend", "append"];
   function buildInlineInstance() {
-    const inst = buildPopupShell();
+    const inst = ctl.buildPopupShell();
     inst.classList.remove("recent-subreddits-popup");
     inst.classList.add("rs-inline", "rs-instance");
     inst.removeAttribute("id");
@@ -1187,7 +1129,7 @@
       inlineInstances.set(selector, rec);
       wireInlineInstance(rec, target);
     }
-    renderContent2(loadData(), rec.host.querySelector(".rs-inline"));
+    ctl.render(loadData(), rec.host.querySelector(".rs-inline"));
   }
   function wireResizeHandle(rec, target) {
     const handle = rec.host.querySelector(".rs-resize-handle");
@@ -1228,7 +1170,7 @@
       const pin = e.target.closest(".rs-pin-btn, .rs-unpin-btn");
       if (pin) {
         e.stopPropagation();
-        togglePin2(pin.dataset.name);
+        ctl.togglePin(pin.dataset.name);
         return;
       }
       if (e.target.closest(".rs-close-btn")) {
@@ -1238,12 +1180,12 @@
       }
       if (e.target.closest(".rs-back-btn")) {
         e.stopPropagation();
-        setSettingsOpen(false, inst);
+        ctl.setSettingsOpen(false, inst);
         return;
       }
       if (e.target.closest(".rs-settings-btn")) {
         e.stopPropagation();
-        setSettingsOpen(!inst.classList.contains("settings-open"), inst);
+        ctl.setSettingsOpen(!inst.classList.contains("settings-open"), inst);
       }
       e.stopPropagation();
     });
@@ -1268,6 +1210,70 @@
       }
     }
     for (const t of wanted) mountInlineInstance(t);
+  }
+
+  // src/app.js
+  var HEADER_TITLE = { main: "\u{1F4CB} Recent Subreddits", settings: "\u2699 Settings" };
+  var sidebarEl = null;
+  var popupEl = null;
+  var settingsOpen = false;
+  function isSettingsOpen() {
+    return settingsOpen;
+  }
+  var panelCtl = {
+    rerender: (host) => renderSettings(host),
+    setSettingsOpen: (open, instance) => setSettingsOpen(open, instance),
+    isPopupVisible: () => isPopupVisible(),
+    togglePopup: (show, trigger) => togglePopup(show, trigger),
+    applyTargets: () => applyTargets(),
+    setActiveHotkey: (combo) => {
+      activeHotkey = combo;
+    }
+  };
+  function renderSettings(instance) {
+    renderSettingsPanel(instance || popupEl, panelCtl);
+  }
+  function refreshAll(data) {
+    renderContent2(data);
+    refreshInline(data);
+  }
+  function togglePin2(name) {
+    togglePin(name, refreshAll);
+  }
+  function buildPopupShell() {
+    const popup = document.createElement("div");
+    popup.className = "recent-subreddits-popup rs-instance";
+    popup.id = "rs-popup";
+    const close = document.createElement("button");
+    close.className = "rs-close-btn";
+    close.id = "rs-close";
+    close.title = "Close";
+    close.textContent = "\u2715";
+    const header = document.createElement("div");
+    header.className = "rs-header-row";
+    const title = document.createElement("h3");
+    title.className = "rs-header";
+    title.textContent = HEADER_TITLE.main;
+    const back = document.createElement("button");
+    back.className = "rs-back-btn";
+    back.id = "rs-back";
+    back.title = "Back";
+    back.textContent = "\u2190";
+    const gear = document.createElement("button");
+    gear.className = "rs-settings-btn";
+    gear.id = "rs-settings";
+    gear.title = "Settings";
+    gear.textContent = "\u2699";
+    header.append(back, title, gear, close);
+    const content = document.createElement("div");
+    content.className = "rs-content";
+    const settings = document.createElement("div");
+    settings.className = "rs-settings-panel";
+    popup.append(header, content, settings);
+    return popup;
+  }
+  function renderContent2(data, instance) {
+    renderContent(data, instance || popupEl, () => !!sidebarEl);
   }
   function setSettingsOpen(open, instance) {
     const host = instance || popupEl;
@@ -1322,6 +1328,12 @@
     }
   }
   function mountSidebar() {
+    initInline({
+      buildPopupShell: () => buildPopupShell(),
+      render: (data, instance) => renderContent2(data, instance),
+      togglePin: (name) => togglePin2(name),
+      setSettingsOpen: (open, instance) => setSettingsOpen(open, instance)
+    });
     if (!sidebarEl) {
       sidebarEl = document.createElement("div");
       sidebarEl.className = "recent-subreddits-container";
