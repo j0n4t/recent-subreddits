@@ -32,11 +32,12 @@ function isSettingsOpen() {
  * a direct import back would be a cycle.
  */
 const panelCtl = {
-  rerender: (host) => renderSettings(host),
-  setSettingsOpen: (open, instance) => setSettingsOpen(open, instance),
-  isPopupVisible: () => isPopupVisible(),
-  togglePopup: (show, trigger) => togglePopup(show, trigger),
-  applyTargets: () => applyTargets(),
+  rerender: renderSettings,
+  setSettingsOpen,
+  isPopupVisible,
+  togglePopup,
+  applyTargets,
+  // A setter, not a function reference: the panel replaces the active combo.
   setActiveHotkey: (combo) => { activeHotkey = combo; },
 };
 
@@ -171,10 +172,10 @@ function ensureMounted() {
 function mountSidebar() {
   // The inline layer calls back into the shell; install its surface once.
   initInline({
-    buildPopupShell: () => buildPopupShell(),
-    render: (data, instance) => renderContent(data, instance),
-    togglePin: (name) => togglePin(name),
-    setSettingsOpen: (open, instance) => setSettingsOpen(open, instance),
+    buildPopupShell,
+    render: renderContent,
+    togglePin,
+    setSettingsOpen,
   });
 
   if (!sidebarEl) {

@@ -1240,11 +1240,12 @@
     return settingsOpen;
   }
   var panelCtl = {
-    rerender: (host) => renderSettings(host),
-    setSettingsOpen: (open, instance) => setSettingsOpen(open, instance),
-    isPopupVisible: () => isPopupVisible(),
-    togglePopup: (show, trigger) => togglePopup(show, trigger),
-    applyTargets: () => applyTargets(),
+    rerender: renderSettings,
+    setSettingsOpen,
+    isPopupVisible,
+    togglePopup,
+    applyTargets,
+    // A setter, not a function reference: the panel replaces the active combo.
     setActiveHotkey: (combo) => {
       activeHotkey = combo;
     }
@@ -1331,10 +1332,10 @@
   }
   function mountSidebar() {
     initInline({
-      buildPopupShell: () => buildPopupShell(),
-      render: (data, instance) => renderContent2(data, instance),
-      togglePin: (name) => togglePin2(name),
-      setSettingsOpen: (open, instance) => setSettingsOpen(open, instance)
+      buildPopupShell,
+      render: renderContent2,
+      togglePin: togglePin2,
+      setSettingsOpen
     });
     if (!sidebarEl) {
       sidebarEl = document.createElement("div");
