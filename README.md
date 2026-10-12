@@ -60,24 +60,61 @@ in the meantime, so a markup change degrades it rather than removing it.
 
 | File | Description |
 |------|-------------|
-| `recent-subreddits.user.js` | The userscript |
+| `recent-subreddits.user.js` | **Built artifact** — the userscript to install. Generated; do not edit by hand. |
+| `src/` | Source modules (see below) |
+| `scripts/build.mjs` | Bundles `src/` into the userscript |
 | `tests/unit/` | Fast unit tests (no browser) |
 | `tests/e2e/` | Browser regression tests over CDP |
 | `tests/fixtures/reddit-mock.html` | Local Reddit stand-in that stubs the `GM_*` APIs |
 | `README.md` | This file |
 
+### Source layout
+
+The userscript is one file by necessity (Tampermonkey installs a single script),
+but it is written as modules and bundled:
+
+| Module | Responsibility |
+|--------|----------------|
+| `src/userscript.meta.js` | The `==UserScript==` block. Prepended verbatim, not imported |
+| `src/app.js` | The shell: mounting, popup visibility, event listeners, init |
+| `src/storage.js` | Visit list, settings, the hook-target cache |
+| `src/visits.js` | URL → subreddit, visit tracking, pin toggling |
+| `src/content.js` | The recent/pinned list HTML |
+| `src/settings-panel.js` | Settings view: hotkey capture, page-target list |
+| `src/inline.js` | Inline instances (replace / prepend / append) |
+| `src/picker.js` | The live element picker overlay |
+| `src/selector.js` | Element → durable CSS selector |
+| `src/triggers.js` | Does this event open the popup? |
+| `src/icons.js` | Subreddit icon cache and fetch |
+| `src/position.js` | Popup placement geometry |
+| `src/hotkey.js` | Hotkey parse / match / capture |
+| `src/diagnostics.js` | The "no trigger matched" warning |
+| `src/styles.js` | The stylesheet |
+| `src/time.js` | Relative timestamps |
+
+Two modules (`settings-panel.js`, `inline.js`) call back into the shell, so they
+receive an injected controller object rather than importing it — that is what
+avoids an import cycle.
+
 ## Development
 
-No dependencies to install — the tests use Node's built-in test runner and
-WebSocket, and drive a real Chromium over the DevTools Protocol.
-
 ```bash
-npm test         # unit tests only (no browser needed)
+npm install      # dev tooling: esbuild, eslint, typescript
+
+npm run build    # bundle src/ -> recent-subreddits.user.js
+npm test         # unit tests (builds first; no browser needed)
 npm run test:e2e # browser regression tests
-npm run test:all # both
+npm run test:all # both suites
+npm run lint     # eslint
+npm run typecheck # tsc (checkJs, no emit)
+npm run check    # lint + typecheck + both suites
 ```
 
-The e2e suite loads the real userscript into `tests/fixtures/reddit-mock.html`,
+`npm test` rebuilds first via a `pretest` hook, so the committed userscript can
+never drift from `src/`. The build is deterministic — rebuilding an unchanged
+tree produces no diff.
+
+The e2e suite loads the built userscript into `tests/fixtures/reddit-mock.html`,
 which mimics the Reddit markup the script anchors to and stubs `GM_getValue`,
 `GM_setValue` and `GM_xmlhttpRequest`. **It never contacts reddit.com**, so bot
 protection and rate limits are not a factor; the icon data comes from the stub.
