@@ -78,7 +78,6 @@ describe('formatTimeAgo', () => {
 });
 
 describe('getSubredditFromUrl', () => {
-  const fn = extractFunction('getSubredditFromUrl');
 
   /** Re-evaluate the function with a stubbed location. */
   function withPath(path) {
@@ -103,9 +102,59 @@ describe('getSubredditFromUrl', () => {
     assert.equal(withPath('/user/someone'), null);
     assert.equal(withPath('/r/'), null);
   });
+});
 
-  // Sanity: the extracted standalone copy must agree with the in-source helper.
-  test('extracted copy matches the original function source', () => {
-    assert.equal(typeof fn, 'function');
+describe('hotkey parsing', () => {
+  const parseHotkey = extractFunction('parseHotkey');
+  const hotkeyMatches = extractFunction('hotkeyMatches');
+
+  test('parses a modifier + key combo', () => {
+    assert.deepEqual(parseHotkey('Alt+Shift+R'), {
+      ctrl: false,
+      alt: true,
+      shift: true,
+      meta: false,
+      key: 'r',
+    });
+  });
+
+  test('accepts modifier aliases and is case-insensitive', () => {
+    const a = parseHotkey('control+option+k');
+    assert.equal(a.ctrl, true);
+    assert.equal(a.alt, true);
+    assert.equal(a.key, 'k');
+    assert.equal(parseHotkey('CMD+J').meta, true);
+  });
+
+  test('rejects a bare modifier (not a shortcut)', () => {
+    assert.equal(parseHotkey('Alt'), null);
+    assert.equal(parseHotkey('Shift+Ctrl'), null);
+    assert.equal(parseHotkey(''), null);
+  });
+
+  test('matches a real keydown', () => {
+    const combo = parseHotkey('Alt+Shift+R');
+    assert.equal(
+      hotkeyMatches({ key: 'R', ctrlKey: false, altKey: true, shiftKey: true, metaKey: false }, combo),
+      true,
+      'shift makes event.key uppercase — must still match'
+    );
+    assert.equal(
+      hotkeyMatches({ key: 'r', ctrlKey: false, altKey: true, shiftKey: false, metaKey: false }, combo),
+      false,
+      'missing shift must not match'
+    );
+    assert.equal(
+      hotkeyMatches({ key: 'R', ctrlKey: false, altKey: true, shiftKey: true, metaKey: true }, combo),
+      false,
+      'an extra modifier must not match'
+    );
+  });
+
+  test('never matches when the combo is unparseable', () => {
+    assert.equal(
+      hotkeyMatches({ key: 'a', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }, null),
+      false
+    );
   });
 });

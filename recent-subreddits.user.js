@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recent Subreddits Sidebar
 // @namespace    https://github.com/your-username/recent-subreddits
-// @version      1.1.0
+// @version      1.2.0
 // @description  Adds a popup menu (triggered by hovering/clicking the Reddit logo) listing recently accessed subreddits with pinning support
 // @match        https://www.reddit.com/*
 // @match        https://old.reddit.com/*
@@ -35,6 +35,113 @@
 
   function saveData(data) {
     GM_setValue(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  // ---------- Settings ----------
+  const SETTINGS_KEY = 'recentSubredditsSettings';
+
+  // The escape hatch: a shortcut that opens the popup without depending on any
+  // Reddit selector. If the header markup changes and the logo stops matching,
+  // this still works, so a markup change degrades the feature instead of killing it.
+  const DEFAULT_SETTINGS = { hotkey: 'Alt+Shift+R' };
+
+  function loadSettings() {
+    try {
+      const raw = GM_getValue(SETTINGS_KEY, null);
+      if (!raw) return { ...DEFAULT_SETTINGS };
+      const parsed = JSON.parse(raw);
+      return {
+        hotkey:
+          typeof parsed.hotkey === 'string' && parsed.hotkey.trim()
+            ? parsed.hotkey.trim()
+            : DEFAULT_SETTINGS.hotkey,
+      };
+    } catch {
+      return { ...DEFAULT_SETTINGS };
+    }
+  }
+
+  function saveSettings(settings) {
+    GM_setValue(SETTINGS_KEY, JSON.stringify(settings));
+  }
+
+  // ---------- Hotkey parsing ----------
+  // Stored as a human-readable string ("Alt+Shift+R") because that is what a
+  // settings field and a bug report can carry. Parsed once, on keydown.
+  function parseHotkey(str) {
+    const parts = String(str).split('+').map((p) => p.trim()).filter(Boolean);
+    const combo = { ctrl: false, alt: false, shift: false, meta: false, key: null };
+
+    for (const part of parts) {
+      const p = part.toLowerCase();
+      if (p === 'ctrl' || p === 'control') combo.ctrl = true;
+      else if (p === 'alt' || p === 'option') combo.alt = true;
+      else if (p === 'shift') combo.shift = true;
+      else if (p === 'meta' || p === 'cmd' || p === 'command' || p === 'super') combo.meta = true;
+      else combo.key = p;
+    }
+
+    // A bare modifier is not a shortcut.
+    return combo.key ? combo : null;
+  }
+
+  function hotkeyMatches(event, combo) {
+    if (!combo) return false;
+    if (event.ctrlKey !== combo.ctrl) return false;
+    if (event.altKey !== combo.alt) return false;
+    if (event.shiftKey !== combo.shift) return false;
+    if (event.metaKey !== combo.meta) return false;
+    // event.key for a letter is case-sensitive ('R' when shift is held).
+    return String(event.key).toLowerCase() === combo.key;
+  }
+
+  // Turn a keydown into a stored combo string, or null if only modifiers are down.
+  function comboFromEvent(event) {
+    const key = event.key;
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) return null;
+
+    const parts = [];
+    if (event.ctrlKey) parts.push('Ctrl');
+    if (event.altKey) parts.push('Alt');
+    if (event.shiftKey) parts.push('Shift');
+    if (event.metaKey) parts.push('Meta');
+
+    // Prefer a printable label: 'r' -> 'R', 'ArrowUp' -> 'ArrowUp'.
+    const label = key.length === 1 ? key.toUpperCase() : key;
+    parts.push(label);
+    return parts.join('+');
+  }
+
+  // ---------- Diagnostics ----------
+  // One warn per condition per page, so a broken selector is visible in the
+  // console without spamming it. Silent when everything matches, which is the
+  // normal case.
+  const warned = new Set();
+
+  function warnOnce(key, message) {
+    if (warned.has(key)) return;
+    warned.add(key);
+    console.warn(`[recent-subreddits] ${message}`);
+  }
+
+  // How many elements currently match the popup triggers. 0 means the feature is
+  // unreachable by hover/click — the signature of a Reddit markup change.
+  function countTriggers() {
+    try {
+      return document.querySelectorAll(TRIGGER_SELECTOR).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  function checkTriggers() {
+    if (countTriggers() > 0) return;
+    warnOnce(
+      'triggers',
+      `no popup trigger matched on this page (selectors: ${TRIGGER_SELECTOR}). ` +
+        `Hovering the logo will not open the popup. Use the hotkey instead, ` +
+        `and report this so the selectors can be updated.`
+    );
   }
 
   // ---------- Subreddit icon cache ----------
@@ -125,26 +232,71 @@
       data.pinned.unshift(name);
     }
     saveData(data);
-    renderSidebar(data);
+    renderContent(data);
   }
 
   // ---------- Build sidebar element ----------
   let sidebarEl = null;
+  let popupEl = null; // persistent; rebuilt content goes inside #rs-content
+  let settingsOpen = false;
 
-  function renderSidebar(data) {
-    if (!sidebarEl) return;
+  function isSettingsOpen() {
+    return settingsOpen;
+  }
+
+  /**
+   * Build the popup's static shell ONCE. Its inner structure never changes, so
+   * the node itself survives every content re-render — which is what lets the
+   * settings modal stay open while pins change underneath it.
+   */
+  function buildPopupShell() {
+    const popup = document.createElement('div');
+    popup.className = 'recent-subreddits-popup';
+    popup.id = 'rs-popup';
+
+    const close = document.createElement('button');
+    close.className = 'rs-close-btn';
+    close.id = 'rs-close';
+    close.title = 'Close';
+    close.textContent = '✕';
+
+    const header = document.createElement('div');
+    header.className = 'rs-header-row';
+
+    const title = document.createElement('h3');
+    title.className = 'rs-header';
+    title.textContent = '📋 Recent Subreddits';
+
+    const gear = document.createElement('button');
+    gear.className = 'rs-settings-btn';
+    gear.id = 'rs-settings';
+    gear.title = 'Settings';
+    gear.textContent = '⚙';
+
+    header.append(title, gear);
+
+    const content = document.createElement('div');
+    content.className = 'rs-content';
+    content.id = 'rs-content';
+
+    const settings = document.createElement('div');
+    settings.className = 'rs-settings-panel';
+    settings.id = 'rs-settings-panel';
+
+    popup.append(close, header, content, settings);
+    return popup;
+  }
+
+  /** Render the recent/pinned list into the stable content node. */
+  function renderContent(data) {
+    if (!sidebarEl || !popupEl) return;
+
+    const content = popupEl.querySelector('#rs-content');
+    if (!content) return;
 
     const { recent, pinned } = data;
 
-    // Preserve visibility + position across re-renders (pin/unpin replaces innerHTML)
-    const wasVisible = isPopupVisible();
-    const oldPopup = sidebarEl.querySelector('.recent-subreddits-popup');
-    const oldLeft = oldPopup ? oldPopup.style.left : '';
-    const oldTop = oldPopup ? oldPopup.style.top : '';
-
-    let html = '<div class="recent-subreddits-popup" id="rs-popup">';
-    html += '<button class="rs-close-btn" id="rs-close" title="Close">✕</button>';
-    html += '<h3 class="rs-header">📋 Recent Subreddits</h3>';
+    let html = '';
 
     if (pinned.length > 0) {
       html += '<div class="rs-section rs-pinned-section">';
@@ -182,51 +334,105 @@
       html += '<div class="rs-empty">No subreddits visited yet.</div>';
     }
 
-    html += '</div>';
-    sidebarEl.innerHTML = html;
-
-    // Restore visibility + position
-    const popup = sidebarEl.querySelector('.recent-subreddits-popup');
-    if (wasVisible) {
-      popup.classList.add('visible');
-      if (oldLeft) popup.style.left = oldLeft;
-      if (oldTop) popup.style.top = oldTop;
-    }
-
-    // Bind events. stopPropagation prevents the document-level "click outside"
-    // handler from closing the popup: togglePin() re-renders via innerHTML, which
-    // detaches the clicked button, so by the time the event bubbles the popup no
-    // longer contains the target and it would be treated as an outside click.
-    sidebarEl.querySelectorAll('.rs-pin-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        togglePin(btn.dataset.name);
-      });
-    });
-    sidebarEl.querySelectorAll('.rs-unpin-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        togglePin(btn.dataset.name);
-      });
-    });
+    content.innerHTML = html;
 
     // Fetch icons for any entries missing one
     [...pinned, ...recentFiltered.map((s) => s.name)].forEach((name) => {
       if (!iconCache[name]) fetchSubredditIcon(name);
     });
-
-    // Close popup when mouse leaves it
-    if (popup) {
-      popup.addEventListener('mouseleave', () => {
-        setTimeout(() => {
-          if (!isPopupVisible()) return;
-          if (popup && !popup.matches(':hover')) {
-            togglePopup(false);
-          }
-        }, 300);
-      });
-    }
   }
+
+  /** Render the settings modal body into its stable node. */
+  function renderSettings() {
+    if (!popupEl) return;
+    const panel = popupEl.querySelector('#rs-settings-panel');
+    if (!panel) return;
+
+    const settings = loadSettings();
+
+    panel.innerHTML = `
+      <div class="rs-field">
+        <label class="rs-label" for="rs-hotkey-input">Open popup hotkey</label>
+        <input class="rs-input" id="rs-hotkey-input" type="text" readonly
+               value="${escAttr(settings.hotkey)}"
+               placeholder="Click and press a combination" />
+        <div class="rs-hint">Click the field, then press the keys you want.
+          Use at least one modifier (Ctrl / Alt / Shift / Meta).</div>
+      </div>
+      <div class="rs-status" id="rs-status"></div>
+      <div class="rs-actions">
+        <button class="rs-btn" id="rs-reset">Reset to default</button>
+        <button class="rs-btn rs-btn-primary" id="rs-done">Done</button>
+      </div>
+    `;
+
+    const input = panel.querySelector('#rs-hotkey-input');
+    const status = panel.querySelector('#rs-status');
+
+    // Capture the combination: the field is readonly so nothing is typed into it,
+    // and the whole keydown is consumed so the host page never sees it.
+    input.addEventListener('keydown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'Escape') {
+        input.blur();
+        return;
+      }
+
+      const combo = comboFromEvent(e);
+      if (!combo) {
+        status.textContent = 'Press a key along with at least one modifier.';
+        status.className = 'rs-status rs-status-error';
+        return;
+      }
+
+      // Require a modifier: a bare letter would fire while the user is typing in
+      // Reddit's own search box.
+      if (!e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+        status.textContent = 'Add a modifier (Ctrl / Alt / Shift / Meta).';
+        status.className = 'rs-status rs-status-error';
+        return;
+      }
+
+      const next = { ...loadSettings(), hotkey: combo };
+      saveSettings(next);
+      input.value = combo;
+      activeHotkey = parseHotkey(combo);
+      // Release focus: while the field is focused the global handler ignores
+      // keydown (the field owns the keys), so leaving it focused would make the
+      // hotkey appear not to work until the user clicked elsewhere.
+      input.blur();
+      status.textContent = `Saved — press ${combo} to open the popup.`;
+      status.className = 'rs-status rs-status-ok';
+    });
+
+    panel.querySelector('#rs-reset').addEventListener('click', (e) => {
+      e.stopPropagation();
+      saveSettings({ ...DEFAULT_SETTINGS });
+      activeHotkey = parseHotkey(DEFAULT_SETTINGS.hotkey);
+      renderSettings();
+      const s = panel.querySelector('#rs-status');
+      s.textContent = `Reset to ${DEFAULT_SETTINGS.hotkey}.`;
+      s.className = 'rs-status rs-status-ok';
+    });
+
+    panel.querySelector('#rs-done').addEventListener('click', (e) => {
+      e.stopPropagation();
+      setSettingsOpen(false);
+    });
+  }
+
+  function setSettingsOpen(open) {
+    settingsOpen = open;
+    if (!popupEl) return;
+
+    popupEl.classList.toggle('settings-open', open);
+    if (open) renderSettings();
+  }
+
+  // Kept in a module-level variable so the hotkey can change without rebinding.
+  let activeHotkey = null;
 
   function formatTimeAgo(timestamp) {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -252,6 +458,10 @@
         --rs-text: var(--color-tone-1, #1c1c1c);
         --rs-text-muted: var(--color-tone-3, #7c7c7c);
         --rs-shadow: rgba(0,0,0,0.15);
+        --rs-accent: #d93a00;
+        --rs-accent-soft: rgba(217,58,0,0.25);
+        --rs-ok: #1a7f37;
+        --rs-error: #c9252d;
 
         display: none;
         position: fixed;
@@ -283,6 +493,8 @@
           --rs-text: #d7dadc;
           --rs-text-muted: #818384;
           --rs-shadow: rgba(0,0,0,0.4);
+          --rs-ok: #4ac26b;
+          --rs-error: #ff7b72;
         }
       }
       /* Reddit dark mode class detection */
@@ -294,14 +506,104 @@
         --rs-text: #d7dadc;
         --rs-text-muted: #818384;
         --rs-shadow: rgba(0,0,0,0.4);
+        --rs-ok: #4ac26b;
+        --rs-error: #ff7b72;
       }
 
-      .rs-header {
+      .rs-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
         margin: 0 0 8px 0;
+      }
+      .rs-header {
+        margin: 0;
         font-size: 14px;
         font-weight: 600;
         color: var(--rs-text);
       }
+      .rs-settings-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 4px;
+        font-size: 13px;
+        line-height: 1;
+        opacity: 0.6;
+        color: var(--rs-text);
+        transition: opacity 0.15s, transform 0.2s;
+      }
+      .rs-settings-btn:hover { opacity: 1; transform: rotate(30deg); }
+
+      /* ---- Settings modal ---- */
+      /* Hidden by default; the popup swaps content for it when .settings-open. */
+      .rs-settings-panel { display: none; }
+      .recent-subreddits-popup.settings-open .rs-content { display: none; }
+      .recent-subreddits-popup.settings-open .rs-settings-panel { display: block; }
+
+      .rs-field { margin-bottom: 10px; }
+      .rs-label {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--rs-text-muted);
+        margin-bottom: 4px;
+      }
+      .rs-input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--rs-text);
+        background: var(--rs-bg);
+        border: 1px solid var(--rs-border);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .rs-input:focus {
+        outline: none;
+        border-color: var(--rs-accent);
+        box-shadow: 0 0 0 2px var(--rs-accent-soft);
+      }
+      .rs-hint {
+        font-size: 11px;
+        color: var(--rs-text-muted);
+        margin-top: 4px;
+        line-height: 1.4;
+      }
+      .rs-status {
+        font-size: 11px;
+        min-height: 14px;
+        margin-bottom: 8px;
+      }
+      .rs-status-ok { color: var(--rs-ok); }
+      .rs-status-error { color: var(--rs-error); }
+      .rs-actions {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .rs-btn {
+        padding: 5px 10px;
+        font-size: 12px;
+        font-family: inherit;
+        color: var(--rs-text);
+        background: none;
+        border: 1px solid var(--rs-border);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .rs-btn:hover { border-color: var(--rs-text-muted); }
+      .rs-btn-primary {
+        background: var(--rs-accent);
+        border-color: var(--rs-accent);
+        color: #fff;
+        font-weight: 600;
+      }
+      .rs-btn-primary:hover { opacity: 0.9; }
       .rs-section { margin-bottom: 8px; }
       .rs-section:last-child { margin-bottom: 0; }
       .rs-section-title {
@@ -377,9 +679,8 @@
 
   // ---------- Popup positioning ----------
   function positionPopup(trigger) {
-    if (!sidebarEl) return;
-    const popup = sidebarEl.querySelector('.recent-subreddits-popup');
-    if (!popup || !trigger) return;
+    if (!popupEl) return;
+    const popup = popupEl;
 
     const rect = trigger.getBoundingClientRect();
     const popupWidth = 280;
@@ -410,23 +711,37 @@
     popup.style.top = top + 'px';
   }
 
+  // Centre the popup when opened by hotkey (no trigger to anchor to).
+  function positionPopupCentered() {
+    if (!popupEl) return;
+    const popup = popupEl;
+    const width = 280;
+    const height = popup.offsetHeight || 300;
+    const margin = 16;
+
+    const left = Math.max(margin, Math.round((window.innerWidth - width) / 2));
+    const top = Math.max(margin, Math.round((window.innerHeight - height) / 2));
+
+    popup.style.left = left + 'px';
+    popup.style.top = top + 'px';
+  }
+
   // ---------- Popup toggle ----------
   function togglePopup(show, trigger) {
-    if (!sidebarEl) return;
-    const popup = sidebarEl.querySelector('.recent-subreddits-popup');
-    if (!popup) return;
+    if (!popupEl) return;
     if (show) {
-      popup.classList.add('visible');
+      popupEl.classList.add('visible');
       if (trigger) positionPopup(trigger);
+      else positionPopupCentered();
     } else {
-      popup.classList.remove('visible');
+      popupEl.classList.remove('visible');
+      // Never leave the settings modal open behind a closed popup.
+      setSettingsOpen(false);
     }
   }
 
   function isPopupVisible() {
-    if (!sidebarEl) return false;
-    const popup = sidebarEl.querySelector('.recent-subreddits-popup');
-    return popup && popup.classList.contains('visible');
+    return !!popupEl && popupEl.classList.contains('visible');
   }
 
   // ---------- Mount popup ----------
@@ -467,17 +782,47 @@
       sidebarEl.className = 'recent-subreddits-container';
       document.body.appendChild(sidebarEl);
 
-      const data = loadData();
-      renderSidebar(data);
+      popupEl = buildPopupShell();
+      sidebarEl.appendChild(popupEl);
+      activeHotkey = parseHotkey(loadSettings().hotkey);
+
+      renderContent(loadData());
     } else {
       ensureMounted();
     }
 
-    // Event delegation for close button (survives re-renders)
+    // ---- Delegated listeners on the wrapper ----
+    // One listener each, on nodes that are never rebuilt, so content re-renders
+    // cannot drop them. stopPropagation keeps the document-level "click outside"
+    // handler from closing the popup when one of its own controls is used.
     sidebarEl.addEventListener('click', (e) => {
-      if (e.target.closest('.rs-close-btn')) {
-        togglePopup(false);
+      const pin = e.target.closest('.rs-pin-btn, .rs-unpin-btn');
+      if (pin) {
+        e.stopPropagation();
+        togglePin(pin.dataset.name);
+        return;
       }
+      if (e.target.closest('.rs-close-btn')) {
+        e.stopPropagation();
+        togglePopup(false);
+        return;
+      }
+      if (e.target.closest('.rs-settings-btn')) {
+        e.stopPropagation();
+        setSettingsOpen(!isSettingsOpen());
+      }
+      // Clicks anywhere else inside the popup are swallowed here so they cannot
+      // reach the document handler and be read as an outside click.
+      e.stopPropagation();
+    });
+
+    // Close popup when the pointer leaves it, with a grace period so the pointer
+    // can travel from the trigger into the popup.
+    sidebarEl.addEventListener('mouseleave', () => {
+      setTimeout(() => {
+        if (!isPopupVisible()) return;
+        if (popupEl && !popupEl.matches(':hover')) togglePopup(false);
+      }, 300);
     });
 
     // ---- Delegated triggers ----
@@ -506,16 +851,36 @@
 
       // Click outside to close
       if (!isPopupVisible()) return;
-      const popup = sidebarEl.querySelector('.recent-subreddits-popup');
-      if (popup && !popup.contains(e.target)) {
+      if (popupEl && !popupEl.contains(e.target)) {
         togglePopup(false);
       }
     });
 
-    // Escape key to close
+    // ---- Keyboard ----
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') togglePopup(false);
+      // The settings field handles its own keys and consumes them.
+      if (e.target && e.target.id === 'rs-hotkey-input') return;
+
+      if (e.key === 'Escape') {
+        // Escape closes the settings modal first, then the popup.
+        if (isSettingsOpen()) {
+          setSettingsOpen(false);
+          return;
+        }
+        togglePopup(false);
+        return;
+      }
+
+      if (hotkeyMatches(e, activeHotkey)) {
+        e.preventDefault();
+        // The escape hatch: works with no trigger on the page at all.
+        if (isPopupVisible()) togglePopup(false);
+        else togglePopup(true);
+      }
     });
+
+    // Warn (once) if no trigger matched — the signature of a Reddit markup change.
+    checkTriggers();
   }
 
   // ---------- SPA navigation detection ----------
@@ -532,7 +897,9 @@
         if (subName) {
           trackVisit(subName);
         }
-        renderSidebar(loadData());
+        renderContent(loadData());
+        // The new view may have a header we do not recognise.
+        checkTriggers();
       }
     });
 

@@ -44,6 +44,34 @@ const CLICK_BODY = `document.body.dispatchEvent(new MouseEvent('click', { bubble
 const POPUP = `.recent-subreddits-popup`;
 const isVisible = `!!document.querySelector('${POPUP}')?.classList.contains('visible')`;
 
+/**
+ * Dispatch a keydown for a combo string like "Alt+Shift+r".
+ *
+ * Targets `document.activeElement` so it reaches whichever node has focus: the
+ * userscript's global listener is on `document`, and the settings hotkey field
+ * handles its own keydown, so a focused field is exercised the way a real key
+ * press would be. Bubbles, so a document-level listener still sees it.
+ */
+const PRESS = (combo) => `(() => {
+  const parts = ${JSON.stringify(combo)}.split('+');
+  const key = parts.pop();
+  const mods = parts.map((p) => p.toLowerCase());
+  const target = document.activeElement && document.activeElement !== document.body
+    ? document.activeElement
+    : document;
+  const ev = new KeyboardEvent('keydown', {
+    key,
+    ctrlKey: mods.includes('ctrl'),
+    altKey: mods.includes('alt'),
+    shiftKey: mods.includes('shift'),
+    metaKey: mods.includes('meta'),
+    bubbles: true,
+    cancelable: true,
+  });
+  target.dispatchEvent(ev);
+  return true;
+})()`;
+
 /** Replace the host header with fresh nodes, simulating SPA navigation re-render. */
 const RERENDER_HEADER = `(() => {
   const old = document.querySelector('#site-header');
@@ -296,5 +324,212 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     const errors = await b.evaluate(`window.__errors`);
     assert.deepEqual(errors, [], `page reported errors: ${JSON.stringify(errors)}`);
+  });
+
+  test('hotkey opens the popup with no trigger present', async () => {
+    // This is the whole point of the hotkey: it must work when every trigger
+    // selector has stopped matching.
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&noTriggers=1`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
+
+    assert.equal(await b.evaluate(isVisible), false, 'popup starts hidden');
+
+    await b.evaluate(PRESS('Alt+Shift+r'));
+    await b.waitUntil(isVisible, 'popup to open via hotkey');
+
+    // Centred, since there is no trigger to anchor to.
+    const geo = await b.evaluate(`(() => {
+      const p = document.querySelector('${POPUP}').getBoundingClientRect();
+      return { left: Math.round(p.left), top: Math.round(p.top), winW: innerWidth, winH: innerHeight };
+    })()`);
+    assert.ok(Math.abs(geo.left - (geo.winW - 280) / 2) < 2, `hotkey popup should be centred horizontally: ${JSON.stringify(geo)}`);
+    assert.ok(geo.top > 0, `centred popup must be on screen: ${JSON.stringify(geo)}`);
+  });
+
+  test('hotkey toggles the popup closed again', async () => {
+    await open();
+    await b.evaluate(PRESS('Alt+Shift+r'));
+    await b.waitUntil(isVisible, 'popup open via hotkey');
+    await b.evaluate(PRESS('Alt+Shift+r'));
+    await b.waitUntil(`!${isVisible}`, 'popup closed via hotkey');
+  });
+
+  test('the default hotkey does not fire on a different combination', async () => {
+    await open();
+    await b.evaluate(PRESS('Alt+r'));       // missing Shift
+    await b.evaluate(PRESS('Ctrl+Shift+r')); // wrong modifier
+    assert.equal(await b.evaluate(isVisible), false, 'only the configured combo may open the popup');
+  });
+
+  test('settings modal opens, captures a new hotkey, and it takes effect', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+
+    // Open settings via the gear.
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel to open'
+    );
+    assert.equal(
+      await b.evaluate(`getComputedStyle(document.querySelector('#rs-settings-panel')).display`),
+      'block',
+      'settings panel should be visible'
+    );
+
+    // Focus the field and press a new combination.
+    await b.evaluate(`document.querySelector('#rs-hotkey-input').focus()`);
+    await b.evaluate(PRESS('Ctrl+Shift+k'));
+
+    assert.equal(
+      await b.evaluate(`document.querySelector('#rs-hotkey-input').value`),
+      'Ctrl+Shift+K',
+      'field should show the captured combination'
+    );
+
+    // Persisted, not just displayed.
+    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
+    assert.equal(stored.hotkey, 'Ctrl+Shift+K', 'new hotkey must be written to storage');
+
+    // The old combo no longer works, the new one does.
+    await b.evaluate(`document.querySelector('#rs-done').click()`);
+    await b.waitUntil(
+      `!document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel to close'
+    );
+
+    await b.evaluate(CLICK_BODY); // close popup
+    await b.waitUntil(`!${isVisible}`, 'popup closed');
+
+    await b.evaluate(PRESS('Alt+Shift+r'));
+    assert.equal(await b.evaluate(isVisible), false, 'the replaced hotkey must stop working');
+
+    await b.evaluate(PRESS('Ctrl+Shift+k'));
+    await b.waitUntil(isVisible, 'popup to open via the newly configured hotkey');
+  });
+
+  test('settings rejects a combination without a modifier', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel open'
+    );
+
+    await b.evaluate(`document.querySelector('#rs-hotkey-input').focus()`);
+    await b.evaluate(PRESS('k')); // bare letter
+
+    const status = await b.evaluate(`document.querySelector('#rs-status').textContent`);
+    assert.match(status, /modifier/i, `expected a modifier warning, got: ${status}`);
+    assert.equal(
+      await b.evaluate(`window.__store.recentSubredditsSettings || null`),
+      null,
+      'an invalid combination must not be saved'
+    );
+  });
+
+  test('settings modal survives a pin change underneath it', async () => {
+    // The popup node is persistent, so a content re-render must not close the modal.
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel open'
+    );
+
+    await b.evaluate(`document.querySelector('.rs-pin-btn[data-name="javascript"]').click()`);
+    await b.waitUntil(
+      `document.querySelectorAll('.rs-pinned .rs-link').length === 2`,
+      'pin to take effect'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      true,
+      'settings must stay open across a content re-render'
+    );
+  });
+
+  test('settings modal resets the hotkey to the default', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel open'
+    );
+
+    await b.evaluate(`document.querySelector('#rs-hotkey-input').focus()`);
+    await b.evaluate(PRESS('Ctrl+Shift+k'));
+    await b.evaluate(`document.querySelector('#rs-reset').click()`);
+
+    assert.equal(
+      await b.evaluate(`document.querySelector('#rs-hotkey-input').value`),
+      'Alt+Shift+R',
+      'reset should restore the default in the field'
+    );
+    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
+    assert.equal(stored.hotkey, 'Alt+Shift+R', 'reset should persist the default');
+  });
+
+  test('Escape closes the settings modal before the popup', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel open'
+    );
+
+    const ESC = `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`;
+    await b.evaluate(ESC);
+    assert.equal(
+      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      false,
+      'first Escape closes the modal'
+    );
+    assert.equal(await b.evaluate(isVisible), true, 'popup stays open after the first Escape');
+
+    await b.evaluate(ESC);
+    await b.waitUntil(`!${isVisible}`, 'second Escape closes the popup');
+  });
+
+  test('WARNS once when no trigger selector matches', async () => {
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&noTriggers=1`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
+
+    const warns = await b.waitUntil(
+      `window.__warns.length > 0 ? window.__warns : null`,
+      'a warning about the missing trigger'
+    );
+    assert.equal(warns.length, 1, `expected exactly one warning, got ${JSON.stringify(warns)}`);
+    assert.match(warns[0], /no popup trigger matched/i);
+    assert.match(warns[0], /recent-subreddits/, 'warning should be prefixed so it is identifiable');
+
+    // Navigating must not spam the console with a repeat.
+    await b.evaluate(`document.body.appendChild(document.createElement('span'))`);
+    await b.evaluate(CLICK_BODY);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(
+      await b.evaluate(`window.__warns.length`),
+      1,
+      'the warning must not repeat'
+    );
+  });
+
+  test('does NOT warn when the trigger is present', async () => {
+    await open();
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual(
+      await b.evaluate(`window.__warns`),
+      [],
+      'a normal page must stay silent in the console'
+    );
   });
 });

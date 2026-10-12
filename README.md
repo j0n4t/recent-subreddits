@@ -12,6 +12,10 @@ anchored to Reddit's logo, with the ability to pin favorites for quick access.
 - Pin/unpin subreddits to keep them at the top
 - Relative timestamps (e.g. "5m ago", "2h ago")
 - Light and dark mode
+- Configurable hotkey to open the popup (default `Alt+Shift+R`) — works even if
+  Reddit changes its header markup and the hover triggers stop matching
+- Warns in the console if no trigger selector matches, so a Reddit markup change
+  is visible instead of silent
 - Works on both new Reddit (www) and old Reddit
 - Handles Reddit's single-page navigation — no page reload needed
 - Data persists across sessions via Tampermonkey storage
@@ -33,6 +37,24 @@ anchored to Reddit's logo, with the ability to pin favorites for quick access.
 - **Unpin button** (✕): Click to unpin — it returns to the Recent section
 - Click any subreddit name to navigate to it
 - Dismiss with the close button, a click outside, or `Escape`
+- **⚙ Settings**: click the gear in the popup header to change the hotkey
+- **Hotkey**: press `Alt+Shift+R` (or your configured combination) to open the
+  popup from anywhere. It does not depend on any Reddit markup, so it still works
+  when the hover trigger does not.
+
+### When it breaks
+
+The one fragile point is the set of selectors used to find the logo/menu button.
+If Reddit changes its header, hover stops working — and the script says so:
+
+```
+[recent-subreddits] no popup trigger matched on this page (selectors: ...).
+Hovering the logo will not open the popup. Use the hotkey instead, and report
+this so the selectors can be updated.
+```
+
+That warning names the selectors that failed. The hotkey keeps the feature usable
+in the meantime, so a markup change degrades it rather than removing it.
 
 ## Files
 

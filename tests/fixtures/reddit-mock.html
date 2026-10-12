@@ -18,7 +18,6 @@
     <button id="menu-btn" aria-label="Open menu">menu</button>
   </header>
   <main id="content">mock page body</main>
-
   <script>
   (() => {
     const params = new URLSearchParams(location.search);
@@ -35,6 +34,20 @@
     window.__store = store;
     window.__xhrCalls = [];
     window.__errors = [];
+    window.__warns = [];
+
+    // Capture console.warn so the "no trigger matched" diagnostic is assertable.
+    const realWarn = console.warn.bind(console);
+    console.warn = (...args) => {
+      window.__warns.push(args.map(String).join(' '));
+      realWarn(...args);
+    };
+
+    // ?noTriggers=1 removes the header before the userscript runs, simulating a
+    // Reddit markup change that breaks every trigger selector.
+    if (params.get('noTriggers')) {
+      document.querySelector('#site-header').remove();
+    }
 
     // Collected for the whole run: a handler that throws part-way aborts the rest
     // of itself and presents as "nothing updated" rather than as a crash.
