@@ -62,11 +62,17 @@
     const out = [];
     for (const t of raw) {
       if (!t || typeof t.selector !== 'string' || !t.selector.trim()) continue;
-      out.push({
+      const entry = {
         selector: t.selector.trim(),
         mode: TARGET_MODES.includes(t.mode) ? t.mode : 'hook',
         events: TARGET_EVENTS.includes(t.events) ? t.events : 'both',
-      });
+      };
+      // Preserve a saved resize size if present.
+      if (t.size && typeof t.size === 'object') {
+        if (typeof t.size.width === 'string') entry.size = { ...entry.size, width: t.size.width };
+        if (typeof t.size.maxHeight === 'string') entry.size = { ...entry.size, maxHeight: t.size.maxHeight };
+      }
+      out.push(entry);
     }
     return out;
   }
@@ -192,8 +198,8 @@
     if (!pickerActive) return;
     const el = e.target;
     if (!el || el.nodeType !== 1) return;
-    // Never target our own chrome.
-    if (el.closest('#rs-popup, #rs-picker-hint')) return;
+    // Never target our own chrome: the popup, an inline block, or the picker hint.
+    if (el.closest('#rs-popup, .rs-inline-host, #rs-picker-hint')) return;
 
     pickerHovered = el;
     const rect = el.getBoundingClientRect();
@@ -389,7 +395,8 @@
   function updateIconInDom(name, icon) {
     if (!sidebarEl || !icon) return;
     const encoded = encodeURIComponent(name);
-    sidebarEl.querySelectorAll('img.rs-icon').forEach((img) => {
+    // Icons live in every mounted instance: the popup and any inline block.
+    document.querySelectorAll('img.rs-icon').forEach((img) => {
       if (img.dataset.name === encoded) img.src = icon;
     });
   }
@@ -461,7 +468,18 @@
       data.pinned.unshift(name);
     }
     saveData(data);
+    // Refresh every mounted instance, not just the popup.
     renderContent(data);
+    refreshInlineInstances();
+  }
+
+  /** Re-render the list inside every mounted inline block. */
+  function refreshInlineInstances() {
+    const data = loadData();
+    for (const rec of inlineInstances.values()) {
+      if (!document.body.contains(rec.host)) continue;
+      renderContent(data, rec.host.querySelector('.rs-inline'));
+    }
   }
 
   // ---------- Build sidebar element ----------
@@ -483,7 +501,7 @@
    */
   function buildPopupShell() {
     const popup = document.createElement('div');
-    popup.className = 'recent-subreddits-popup';
+    popup.className = 'recent-subreddits-popup rs-instance';
     popup.id = 'rs-popup';
 
     const close = document.createElement('button');
@@ -515,21 +533,23 @@
 
     const content = document.createElement('div');
     content.className = 'rs-content';
-    content.id = 'rs-content';
 
     const settings = document.createElement('div');
     settings.className = 'rs-settings-panel';
-    settings.id = 'rs-settings-panel';
 
     popup.append(header, content, settings);
     return popup;
   }
 
-  /** Render the recent/pinned list into the stable content node. */
-  function renderContent(data) {
-    if (!sidebarEl || !popupEl) return;
+  /**
+   * Render the recent/pinned list into one instance's content slot.
+   * `instance` defaults to the popup; an inline target passes its own node.
+   */
+  function renderContent(data, instance) {
+    const host = instance || popupEl;
+    if (!host) return;
 
-    const content = popupEl.querySelector('#rs-content');
+    const content = host.querySelector('.rs-content');
     if (!content) return;
 
     const { recent, pinned } = data;
@@ -580,10 +600,14 @@
     });
   }
 
-  /** Render the settings modal body into its stable node. */
-  function renderSettings() {
-    if (!popupEl) return;
-    const panel = popupEl.querySelector('#rs-settings-panel');
+  /**
+   * Render the settings panel body into one instance's settings slot.
+   * `instance` defaults to the popup; an inline target passes its own node.
+   */
+  function renderSettings(instance) {
+    const host = instance || popupEl;
+    if (!host) return;
+    const panel = host.querySelector('.rs-settings-panel');
     if (!panel) return;
 
     const settings = loadSettings();
@@ -615,13 +639,13 @@
 
     const targetRows = settings.targets.length
       ? settings.targets
-          .map((t, i) => {
-            // Events only mean something for a hook target.
-            const eventsCell =
-              t.mode === 'hook'
-                ? `<select class="rs-select" data-role="events" data-index="${i}">${eventOptions(t.events)}</select>`
-                : `<span class="rs-muted">—</span>`;
-            return `
+        .map((t, i) => {
+          // Events only mean something for a hook target.
+          const eventsCell =
+            t.mode === 'hook'
+              ? `<select class="rs-select" data-role="events" data-index="${i}">${eventOptions(t.events)}</select>`
+              : `<span class="rs-muted">—</span>`;
+          return `
               <li class="rs-target">
                 <code class="rs-target-sel" title="${escAttr(t.selector)}">${escAttr(t.selector)}</code>
                 <div class="rs-target-controls">
@@ -630,14 +654,14 @@
                   <button class="rs-icon-btn" data-role="remove" data-index="${i}" title="Remove">✕</button>
                 </div>
               </li>`;
-          })
-          .join('')
+        })
+        .join('')
       : '<li class="rs-empty">No page targets yet.</li>';
 
     panel.innerHTML = `
       <div class="rs-field">
-        <label class="rs-label" for="rs-hotkey-input">Open popup hotkey</label>
-        <input class="rs-input" id="rs-hotkey-input" type="text" readonly
+        <label class="rs-label">Open popup hotkey</label>
+        <input class="rs-input rs-hotkey-input" type="text" readonly
                value="${escAttr(settings.hotkey)}"
                placeholder="Click and press a combination" />
         <div class="rs-hint">Click the field, then press the keys you want.
@@ -647,26 +671,26 @@
       <div class="rs-field">
         <div class="rs-label-row">
           <label class="rs-label">Page targets</label>
-          <button class="rs-btn rs-btn-small" id="rs-pick">Pick element…</button>
+          <button class="rs-btn rs-btn-small" data-role="pick">Pick element…</button>
         </div>
         <div class="rs-hint">Pick an element on the page, then choose what it does.
           A hook opens the popup; the others render the list inline there.</div>
-        <ul class="rs-targets" id="rs-targets">${targetRows}</ul>
+        <ul class="rs-targets">${targetRows}</ul>
       </div>
 
-      <div class="rs-status" id="rs-status"></div>
+      <div class="rs-status"></div>
       <div class="rs-actions">
-        <button class="rs-btn" id="rs-reset">Reset to default</button>
-        <button class="rs-btn rs-btn-primary" id="rs-done">Done</button>
+        <button class="rs-btn" data-role="reset">Reset to default</button>
+        <button class="rs-btn rs-btn-primary" data-role="done">Done</button>
       </div>
     `;
 
-    const input = panel.querySelector('#rs-hotkey-input');
+    const input = panel.querySelector('.rs-hotkey-input');
 
     const say = (msg, kind) => {
       // Re-query: renderSettings() rebuilds the panel, so a captured reference
       // goes stale and the message would land on a detached node.
-      const el = panel.querySelector('#rs-status');
+      const el = panel.querySelector('.rs-status');
       if (!el) return;
       el.textContent = msg;
       el.className = 'rs-status ' + (kind === 'error' ? 'rs-status-error' : 'rs-status-ok');
@@ -708,18 +732,23 @@
     });
 
     // ---- Target list ----
+    // `host` (declared above) is the instance whose panel is being edited.
+    // Settings can be opened from the popup OR from an inline block, so every
+    // write re-renders that same host rather than assuming the popup.
+
     const updateTarget = (index, patch) => {
       const s = loadSettings();
       if (!s.targets[index]) return;
       Object.assign(s.targets[index], patch);
       saveSettings(s);
-      renderSettings();
-      // Re-focus the control the user was using, so a mode change is not a dead end.
+      renderSettings(host);
+      // A mode change alters the row's controls, so the instance is rebuilt.
+      if ('mode' in patch) applyTargets();
       const sel = panel.querySelector(`[data-role="mode"][data-index="${index}"]`);
       if (sel && 'mode' in patch) sel.focus();
     };
 
-    panel.querySelector('#rs-pick').addEventListener('click', (e) => {
+    panel.querySelector('[data-role="pick"]').addEventListener('click', (e) => {
       e.stopPropagation();
       // Close the popup so the whole page is pickable, then re-open settings after.
       const wasOpen = isPopupVisible();
@@ -736,7 +765,7 @@
           }
           s.targets.push({ selector, mode: 'hook', events: 'both' });
           saveSettings(s);
-          renderSettings();
+          renderSettings(host);
           say(`Added ${selector}`);
         },
         () => {
@@ -747,55 +776,280 @@
       );
     });
 
-    panel.querySelector('#rs-targets').addEventListener('click', (e) => {
+    panel.querySelector('.rs-targets').addEventListener('click', (e) => {
       const btn = e.target.closest('[data-role="remove"]');
       if (!btn) return;
       e.stopPropagation();
       const s = loadSettings();
       s.targets.splice(Number(btn.dataset.index), 1);
       saveSettings(s);
-      renderSettings();
-      const s2 = panel.querySelector('#rs-status');
-      s2.textContent = 'Target removed.';
-      s2.className = 'rs-status rs-status-ok';
+      renderSettings(host);
+      // A removed target may have been an inline one — tear its block down.
+      applyTargets();
+      say('Target removed.');
     });
 
-    panel.querySelector('#rs-targets').addEventListener('change', (e) => {
+    panel.querySelector('.rs-targets').addEventListener('change', (e) => {
       const sel = e.target.closest('[data-role="mode"], [data-role="events"]');
       if (!sel) return;
       e.stopPropagation();
       const index = Number(sel.dataset.index);
       const role = sel.dataset.role;
       updateTarget(index, role === 'mode' ? { mode: sel.value } : { events: sel.value });
-      const s2 = panel.querySelector('#rs-status');
-      s2.textContent = 'Target updated.';
-      s2.className = 'rs-status rs-status-ok';
+      say('Target updated.');
     });
 
-    panel.querySelector('#rs-reset').addEventListener('click', (e) => {
+    panel.querySelector('[data-role="reset"]').addEventListener('click', (e) => {
       e.stopPropagation();
       saveSettings({ ...DEFAULT_SETTINGS });
       activeHotkey = parseHotkey(DEFAULT_SETTINGS.hotkey);
-      renderSettings();
-      const s = panel.querySelector('#rs-status');
-      s.textContent = `Reset to ${DEFAULT_SETTINGS.hotkey}.`;
-      s.className = 'rs-status rs-status-ok';
+      // Reset clears the targets too, so the inline blocks must go.
+      applyTargets();
+      renderSettings(host);
+      say(`Reset to ${DEFAULT_SETTINGS.hotkey}.`);
     });
 
-    panel.querySelector('#rs-done').addEventListener('click', (e) => {
+    panel.querySelector('[data-role="done"]').addEventListener('click', (e) => {
       e.stopPropagation();
       setSettingsOpen(false);
     });
   }
 
-  function setSettingsOpen(open) {
-    settingsOpen = open;
-    if (!popupEl) return;
+  // ---------- Inline instances (replace / prepend / append) ----------
+  // Each inline target gets a full instance of the UI — header, list, settings —
+  // built from the same shell as the popup, minus the popup-only chrome. The
+  // block is inserted NEXT TO the picked element rather than inside it, and the
+  // element is hidden with visibility (not display/remove) so the host's own
+  // layout, event handlers and framework references stay intact.
+  const inlineInstances = new Map(); // selector -> { el, host, mode }
 
-    popupEl.classList.toggle('settings-open', open);
-    const title = popupEl.querySelector('.rs-header');
+  const INLINE_MODES = ['replace', 'prepend', 'append'];
+
+  function buildInlineInstance(target) {
+    const inst = buildPopupShell();
+
+    // Inline blocks are always visible and are not a popup: drop the popup's
+    // classes and positioning, but keep the shared instance class that carries
+    // the content/settings swap rules.
+    inst.classList.remove('recent-subreddits-popup');
+    inst.classList.add('rs-inline', 'rs-instance');
+    inst.removeAttribute('id');
+    inst.classList.remove('visible');
+    // The close button's job here is to drop the binding, not to hide a popup.
+    const close = inst.querySelector('.rs-close-btn');
+    if (close) close.title = 'Remove this binding';
+
+    // The inline block has no anchor, so a hotkey-positioned popup is irrelevant.
+    return inst;
+  }
+
+  /** Copy the host element's box so a replace keeps the page's layout. */
+  function matchElementBox(inst, el) {
+    const rect = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    // Only adopt a real size — a hidden or zero-height element must not collapse
+    // the block to nothing.
+    if (rect.width > 0) {
+      inst.style.width = rect.width + 'px';
+      inst.style.maxWidth = '100%';
+    }
+    // Keep it from inheriting the host's own typography or colour rules.
+    if (cs.fontSize) inst.style.fontSize = cs.fontSize;
+
+    // Absorb the host element's positioning so a sticky/fixed replacement
+    // sticks the same way the original did.
+    if (cs.position !== 'static') {
+      inst.style.position = cs.position;
+      if (cs.top !== 'auto') inst.style.top = cs.top;
+      if (cs.right !== 'auto') inst.style.right = cs.right;
+      if (cs.bottom !== 'auto') inst.style.bottom = cs.bottom;
+      if (cs.left !== 'auto') inst.style.left = cs.left;
+      if (cs.zIndex !== 'auto') inst.style.zIndex = cs.zIndex;
+    }
+    if (cs.margin !== '0px') inst.style.margin = cs.margin;
+    if (cs.boxSizing) inst.style.boxSizing = cs.boxSizing;
+  }
+
+  /** Mount (or refresh) one inline instance for a target. */
+  function mountInlineInstance(target) {
+    const { selector, mode } = target;
+
+    let el;
+    try {
+      el = document.querySelector(selector);
+    } catch {
+      return; // a hand-typed selector may be invalid
+    }
+    if (!el) return; // nothing on this page matches; nothing to do
+
+    let rec = inlineInstances.get(selector);
+
+    // Rebuild when the mode changed or the block was detached by the host.
+    if (rec && (rec.mode !== mode || !document.body.contains(rec.host))) {
+      rec.host.remove();
+      rec = null;
+    }
+
+    if (!rec) {
+      const inst = buildInlineInstance(target);
+      const host = document.createElement('div');
+      host.className = 'rs-inline-host' + (mode === 'replace' ? ' rs-inline-host-replace' : '');
+      host.dataset.rsSelector = selector;
+      host.appendChild(inst);
+
+      // Add a resize handle so the user can adjust the block size.
+      const handle = document.createElement('div');
+      handle.className = 'rs-resize-handle';
+      host.appendChild(handle);
+
+      // Placement relative to the picked element.
+      if (mode === 'replace') {
+        // Nest inside the element and overlap it — avoids leaving a gap
+        // in the document flow where the hidden element used to be.
+        el.style.visibility = 'hidden';
+        el.appendChild(host);
+      } else if (mode === 'prepend') {
+        el.insertBefore(host, el.firstChild);
+      } else {
+        el.appendChild(host);
+      }
+
+      if (mode === 'replace') matchElementBox(inst, el);
+
+      // Restore a previously saved size.
+      if (target.size) {
+        if (target.size.width) inst.style.width = target.size.width;
+        if (target.size.height) inst.style.maxHeight = target.size.height;
+      }
+
+      rec = { el, host, mode };
+      inlineInstances.set(selector, rec);
+      wireInlineInstance(rec, target);
+    }
+
+    renderContent(loadData(), rec.host.querySelector('.rs-inline'));
+  }
+
+  /** Wire the resize handle so the user can drag the block to a new size. */
+  function wireResizeHandle(rec, target) {
+    const handle = rec.host.querySelector('.rs-resize-handle');
+    const inst = rec.host.querySelector('.rs-inline');
+    if (!handle || !inst) return;
+
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const startW = inst.offsetWidth;
+      const startH = inst.offsetHeight;
+
+      const onMove = (ev) => {
+        const newW = Math.max(80, startW + ev.clientX - startX);
+        const newH = Math.max(60, startH + ev.clientY - startY);
+        inst.style.width = newW + 'px';
+        inst.style.maxHeight = newH + 'px';
+      };
+
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        // Persist the new size so it survives re-mounts.
+        const s = loadSettings();
+        const t = s.targets.find((t) => t.selector === target.selector);
+        if (t) {
+          t.size = { width: inst.style.width, maxHeight: inst.style.maxHeight };
+          saveSettings(s);
+        }
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  /** Delegated handlers for one inline block. */
+  function wireInlineInstance(rec, target) {
+    const inst = rec.host.querySelector('.rs-inline');
+    if (!inst) return;
+
+    wireResizeHandle(rec, target);
+
+    // Pin/unpin, close (unbind), settings toggle — same behaviour as the popup,
+    // but scoped to this block and with no popup to open or close.
+    inst.addEventListener('click', (e) => {
+      const pin = e.target.closest('.rs-pin-btn, .rs-unpin-btn');
+      if (pin) {
+        e.stopPropagation();
+        togglePin(pin.dataset.name);
+        return;
+      }
+      if (e.target.closest('.rs-close-btn')) {
+        e.stopPropagation();
+        // The close button removes this binding instead of closing a popup.
+        removeTargetBySelector(target.selector);
+        return;
+      }
+      if (e.target.closest('.rs-back-btn')) {
+        e.stopPropagation();
+        setSettingsOpen(false, inst);
+        return;
+      }
+      if (e.target.closest('.rs-settings-btn')) {
+        e.stopPropagation();
+        setSettingsOpen(!inst.classList.contains('settings-open'), inst);
+      }
+      // Keep clicks inside the block from reaching the document handlers, which
+      // would read them as an outside click and close the popup.
+      e.stopPropagation();
+    });
+  }
+
+  function removeTargetBySelector(selector) {
+    const s = loadSettings();
+    const i = s.targets.findIndex((t) => t.selector === selector);
+    if (i < 0) return;
+    s.targets.splice(i, 1);
+    saveSettings(s);
+    applyTargets();
+  }
+
+  /**
+   * Reconcile the DOM with the configured inline targets: mount what is missing,
+   * tear down what is no longer configured, and unhide elements we had hidden.
+   * Safe to call after any settings write or navigation.
+   */
+  function applyTargets() {
+    if (!document.body) return;
+    const wanted = loadSettings().targets.filter((t) => INLINE_MODES.includes(t.mode));
+
+    // Tear down instances whose target is gone or whose mode left the inline set.
+    for (const [selector, rec] of Array.from(inlineInstances.entries())) {
+      const stillWanted = wanted.some((t) => t.selector === selector);
+      if (!stillWanted) {
+        // Un-hide the element we replaced, or it stays invisible forever.
+        if (rec.el && rec.el.style.visibility === 'hidden') rec.el.style.visibility = '';
+        rec.host.remove();
+        inlineInstances.delete(selector);
+      }
+    }
+
+    for (const t of wanted) mountInlineInstance(t);
+  }
+
+  function setSettingsOpen(open, instance) {
+    const host = instance || popupEl;
+    if (!host) return;
+
+    // Only the popup tracks this flag; an inline block's panel is toggled by
+    // its own gear and never blocks the global Escape handling.
+    if (host === popupEl) settingsOpen = open;
+
+    host.classList.toggle('settings-open', open);
+    const title = host.querySelector('.rs-header');
     if (title) title.textContent = open ? HEADER_TITLE.settings : HEADER_TITLE.main;
-    if (open) renderSettings();
+    if (open) renderSettings(host);
   }
 
   // Kept in a module-level variable so the hotkey can change without rebinding.
@@ -904,8 +1158,15 @@
         display: none;
         transition: color 0.15s;
       }
-      .rs-back-btn:hover { color: var(--rs-text); }
-      .recent-subreddits-popup.settings-open .rs-back-btn { display: block; }
+      /* ---- Shared instance chrome ---- */
+      /* The popup and the inline blocks are the same UI in two containers, so
+         the view-swap rules key off a shared class rather than the popup's. */
+      .rs-instance.settings-open .rs-content { display: none; }
+      .rs-instance.settings-open .rs-settings-panel { display: block; }
+      .rs-instance.settings-open .rs-back-btn { display: block; }
+      /* The gear is redundant next to the "⚙ Settings" title; back is the way out. */
+      .rs-instance.settings-open .rs-settings-btn { display: none; }
+
       .rs-settings-btn {
         background: none;
         border: none;
@@ -917,15 +1178,11 @@
         color: var(--rs-text);
         transition: opacity 0.15s, transform 0.2s;
       }
-      /* The gear is redundant next to the "⚙ Settings" title; back is the way out. */
-      .recent-subreddits-popup.settings-open .rs-settings-btn { display: none; }
       .rs-settings-btn:hover { opacity: 1; transform: rotate(30deg); }
 
       /* ---- Settings modal ---- */
-      /* Hidden by default; the popup swaps content for it when .settings-open. */
+      /* Hidden by default; .settings-open on the instance swaps content for it. */
       .rs-settings-panel { display: none; }
-      .recent-subreddits-popup.settings-open .rs-content { display: none; }
-      .recent-subreddits-popup.settings-open .rs-settings-panel { display: block; }
 
       .rs-field { margin-bottom: 10px; }
       .rs-label {
@@ -1123,6 +1380,86 @@
         font-style: italic;
         padding: 8px 0;
       }
+      /* ---- Inline instances (replace / prepend / append) ---- */
+      /* Same UI as the popup, but in the page flow with no border or shadow.
+         The design tokens live on .recent-subreddits-popup, so the inline block
+         re-declares them here — otherwise every var() resolves to nothing and
+         the text renders on a transparent background. */
+      .rs-inline {
+        --rs-bg: var(--color-tone-4, #f6f7f8);
+        --rs-border: var(--color-tone-5, #e4e6e8);
+        --rs-text: var(--color-tone-1, #1c1c1c);
+        --rs-text-muted: var(--color-tone-3, #7c7c7c);
+        --rs-shadow: rgba(0,0,0,0.15);
+        --rs-accent: #d93a00;
+        --rs-accent-soft: rgba(217,58,0,0.25);
+        --rs-ok: #1a7f37;
+        --rs-error: #c9252d;
+
+        display: block;
+        position: static;
+        width: auto;
+        max-height: none;
+        overflow: visible;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 6px;
+        box-shadow: none;
+        z-index: auto;
+        font-size: 13px;
+      }
+      @media (prefers-color-scheme: dark) {
+        .rs-inline {
+          --rs-bg: #1a1a1b;
+          --rs-border: #343536;
+          --rs-text: #d7dadc;
+          --rs-text-muted: #818384;
+          --rs-shadow: rgba(0,0,0,0.4);
+          --rs-ok: #4ac26b;
+          --rs-error: #ff7b72;
+        }
+      }
+      body.theme-dark .rs-inline,
+      html[data-theme="dark"] .rs-inline,
+      .dark-mode .rs-inline {
+        --rs-bg: #1a1a1b;
+        --rs-border: #343536;
+        --rs-text: #d7dadc;
+        --rs-text-muted: #818384;
+        --rs-shadow: rgba(0,0,0,0.4);
+        --rs-ok: #4ac26b;
+        --rs-error: #ff7b72;
+      }
+      .rs-inline-host { display: block; position: relative; }
+      .rs-inline-host-replace {
+        position: absolute;
+        visibility: visible;
+        top: 0;
+        left: 0;
+      }
+
+      /* ---- Resize handle for inline blocks ---- */
+      .rs-resize-handle {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 10px;
+        height: 10px;
+        cursor: se-resize;
+        opacity: 0.25;
+        transition: opacity 0.15s;
+        /* Hardcoded grey — visible on both light and dark backgrounds.
+           CSS vars don't inherit from sibling to child, so --rs-text-muted
+           is undefined here. */
+        background:
+          linear-gradient(135deg, transparent 0%, transparent 42%, #888 42%, #888 58%, transparent 58%),
+          linear-gradient(135deg, transparent 0%, transparent 62%, #888 62%, #888 78%, transparent 78%);
+        z-index: 1;
+      }
+      .rs-resize-handle:hover { opacity: 0.7; }
+
+      /* The close button's role here is to drop the binding. */
       .rs-close-btn {
         margin-left: auto;
         background: none;
@@ -1290,8 +1627,11 @@
       activeHotkey = parseHotkey(loadSettings().hotkey);
 
       renderContent(loadData());
+      // Mount any configured inline blocks on this page.
+      applyTargets();
     } else {
       ensureMounted();
+      applyTargets();
     }
 
     // ---- Delegated listeners on the wrapper ----
@@ -1368,7 +1708,7 @@
     // ---- Keyboard ----
     document.addEventListener('keydown', (e) => {
       // The settings field handles its own keys and consumes them.
-      if (e.target && e.target.id === 'rs-hotkey-input') return;
+      if (e.target && e.target.classList && e.target.classList.contains('rs-hotkey-input')) return;
 
       if (e.key === 'Escape') {
         // Escape closes the settings modal first, then the popup.
@@ -1407,6 +1747,11 @@
           trackVisit(subName);
         }
         renderContent(loadData());
+        // The new view replaced the DOM: inline hosts may be gone, and the new
+        // view may have elements matching targets that were absent before.
+        // Only on a URL change — applyTargets() inserts nodes, and calling it on
+        // every mutation would fight the observer's own trigger.
+        applyTargets();
         // The new view may have a header we do not recognise.
         checkTriggers();
       }

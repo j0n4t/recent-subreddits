@@ -379,17 +379,17 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'settings panel to open'
     );
     assert.equal(
-      await b.evaluate(`getComputedStyle(document.querySelector('#rs-settings-panel')).display`),
+      await b.evaluate(`getComputedStyle(document.querySelector('.rs-settings-panel')).display`),
       'block',
       'settings panel should be visible'
     );
 
     // Focus the field and press a new combination.
-    await b.evaluate(`document.querySelector('#rs-hotkey-input').focus()`);
+    await b.evaluate(`document.querySelector('.rs-hotkey-input').focus()`);
     await b.evaluate(PRESS('Ctrl+Shift+k'));
 
     assert.equal(
-      await b.evaluate(`document.querySelector('#rs-hotkey-input').value`),
+      await b.evaluate(`document.querySelector('.rs-hotkey-input').value`),
       'Ctrl+Shift+K',
       'field should show the captured combination'
     );
@@ -399,7 +399,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.equal(stored.hotkey, 'Ctrl+Shift+K', 'new hotkey must be written to storage');
 
     // The old combo no longer works, the new one does.
-    await b.evaluate(`document.querySelector('#rs-done').click()`);
+    await b.evaluate(`document.querySelector('[data-role="done"]').click()`);
     await b.waitUntil(
       `!document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel to close'
@@ -425,10 +425,10 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'settings panel open'
     );
 
-    await b.evaluate(`document.querySelector('#rs-hotkey-input').focus()`);
+    await b.evaluate(`document.querySelector('.rs-hotkey-input').focus()`);
     await b.evaluate(PRESS('k')); // bare letter
 
-    const status = await b.evaluate(`document.querySelector('#rs-status').textContent`);
+    const status = await b.evaluate(`document.querySelector('.rs-status').textContent`);
     assert.match(status, /modifier/i, `expected a modifier warning, got: ${status}`);
     assert.equal(
       await b.evaluate(`window.__store.recentSubredditsSettings || null`),
@@ -470,12 +470,12 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'settings panel open'
     );
 
-    await b.evaluate(`document.querySelector('#rs-hotkey-input').focus()`);
+    await b.evaluate(`document.querySelector('.rs-hotkey-input').focus()`);
     await b.evaluate(PRESS('Ctrl+Shift+k'));
-    await b.evaluate(`document.querySelector('#rs-reset').click()`);
+    await b.evaluate(`document.querySelector('[data-role="reset"]').click()`);
 
     assert.equal(
-      await b.evaluate(`document.querySelector('#rs-hotkey-input').value`),
+      await b.evaluate(`document.querySelector('.rs-hotkey-input').value`),
       'Alt+Shift+R',
       'reset should restore the default in the field'
     );
@@ -615,7 +615,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
 
     // Start picking. The popup must get out of the way so the page is pickable.
-    await b.evaluate(`document.querySelector('#rs-pick').click()`);
+    await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
     await b.waitUntil(
       `!!document.getElementById('rs-picker-hint')`,
       'picker overlay to appear'
@@ -693,7 +693,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'settings panel open'
     );
 
-    await b.evaluate(`document.querySelector('#rs-pick').click()`);
+    await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
     await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
 
     await b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
@@ -726,7 +726,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // Pick the same element twice.
     for (let i = 0; i < 2; i++) {
-      await b.evaluate(`document.querySelector('#rs-pick').click()`);
+      await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
       await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, `picker active (${i})`);
       await b.evaluate(`(() => {
         const el = document.querySelector('#pick-target');
@@ -758,7 +758,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // Read the selector the picker proposes for an element, without committing it.
     const propose = async (sel) => {
-      await b.evaluate(`document.querySelector('#rs-pick').click()`);
+      await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
       await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
       const text = await b.evaluate(`(() => {
         const el = document.querySelector(${JSON.stringify(sel)});
@@ -864,7 +864,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
 
     // Pick an element, then switch its mode.
-    await b.evaluate(`document.querySelector('#rs-pick').click()`);
+    await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
     await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
     await b.evaluate(`(() => {
       const el = document.querySelector('#pick-target');
@@ -905,7 +905,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'settings open'
     );
 
-    await b.evaluate(`document.querySelector('#rs-pick').click()`);
+    await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
     await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
     await b.evaluate(`(() => {
       const el = document.querySelector('#pick-target');
@@ -964,6 +964,266 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
 
     assert.deepEqual(await b.evaluate(`window.__errors`), [], 'a bad store must not throw');
+  });
+
+  // ---- Inline modes (replace / prepend / append) ----
+
+  test('inline replace: hides the element, nests the UI inside it without leaving a gap, keeps the binding alive', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'replace' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    const state = await b.evaluate(`(() => {
+      const el = document.querySelector('#pick-target');
+      const host = document.querySelector('.rs-inline-host');
+      return {
+        elVisibility: getComputedStyle(el).visibility,
+        elStillInDom: document.body.contains(el),
+        // The block nests INSIDE the element (absolutely positioned, overlapping
+        // it) so no gap is left in the document flow.
+        hostInsideEl: el.contains(host),
+        listItems: host.querySelectorAll('.rs-item').length,
+        // The whole UI came along: header + gear + close.
+        hasHeader: !!host.querySelector('.rs-header'),
+        hasGear: !!host.querySelector('.rs-settings-btn'),
+        hasClose: !!host.querySelector('.rs-close-btn'),
+      };
+    })()`);
+
+    assert.equal(state.elVisibility, 'hidden', 'replace must hide the picked element');
+    assert.equal(state.elStillInDom, true, 'replace must NOT remove the element from the DOM');
+    assert.equal(state.hostInsideEl, true, 'the block must be nested inside the element to avoid a flow gap');
+    assert.ok(state.listItems > 0, `the inline block must render the list, got ${state.listItems}`);
+    assert.equal(state.hasHeader, true, 'the inline block must carry the header');
+    assert.equal(state.hasGear, true, 'the inline block must carry the settings gear');
+    assert.equal(state.hasClose, true, 'the inline block must carry the close control');
+  });
+
+  test('inline replace: adopts the replaced element width', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'replace' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    const widths = await b.evaluate(`(() => {
+      const el = document.querySelector('#pick-target');
+      // Measure the element while it is still laid out (visibility, not display).
+      const w = el.getBoundingClientRect().width;
+      const inst = document.querySelector('.rs-inline');
+      return { elW: Math.round(w), instW: Math.round(inst.getBoundingClientRect().width), css: inst.style.width };
+    })()`);
+    assert.equal(widths.css, `${widths.elW}px`, 'the block should adopt the element width');
+    // The instance is wider by the padding (6px each side = 12px total).
+    assert.ok(
+      Math.abs(widths.instW - widths.elW - 12) <= 1,
+      `the rendered block should match the element width plus padding, got ${JSON.stringify(widths)}`
+    );
+  });
+
+  test('inline prepend: inserts the UI as the first child, element untouched', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#content', mode: 'prepend' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    const state = await b.evaluate(`(() => {
+      const el = document.querySelector('#content');
+      const host = document.querySelector('.rs-inline-host');
+      return {
+        firstChild: el.firstElementChild === host,
+        inside: el.contains(host),
+        visibility: getComputedStyle(el).visibility,
+      };
+    })()`);
+    assert.equal(state.firstChild, true, 'prepend must insert as the first child');
+    assert.equal(state.inside, true, 'prepend must insert inside the element');
+    assert.notEqual(state.visibility, 'hidden', 'prepend must not hide the element');
+  });
+
+  test('inline append: inserts the UI as the last child, element untouched', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#content', mode: 'append' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    const state = await b.evaluate(`(() => {
+      const el = document.querySelector('#content');
+      const host = document.querySelector('.rs-inline-host');
+      return {
+        lastChild: el.lastElementChild === host,
+        inside: el.contains(host),
+        visibility: getComputedStyle(el).visibility,
+      };
+    })()`);
+    assert.equal(state.lastChild, true, 'append must insert as the last child');
+    assert.equal(state.inside, true, 'append must insert inside the element');
+    assert.notEqual(state.visibility, 'hidden', 'append must not hide the element');
+  });
+
+  test('inline block: the close button removes the binding and un-hides the element', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'replace' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    await b.evaluate(`document.querySelector('.rs-inline .rs-close-btn').click()`);
+    await b.waitUntil(`!document.querySelector('.rs-inline-host')`, 'the block to be removed');
+
+    assert.deepEqual(
+      await b.evaluate(`JSON.parse(window.__store.recentSubredditsSettings).targets`),
+      [],
+      'the binding must be removed from settings'
+    );
+    assert.equal(
+      await b.evaluate(`getComputedStyle(document.querySelector('#pick-target')).visibility`),
+      'visible',
+      'the replaced element must be un-hidden when the binding is dropped'
+    );
+  });
+
+  test('inline block: pinning works from the inline UI', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'append' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    await b.evaluate(`document.querySelector('.rs-inline .rs-pin-btn[data-name="javascript"]').click()`);
+    await b.waitUntil(
+      `document.querySelectorAll('.rs-inline .rs-pinned .rs-link').length === 2`,
+      'the inline list to show the new pin'
+    );
+
+    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubreddits`));
+    assert.deepEqual(stored.pinned, ['javascript', 'linux'], 'the pin must be persisted');
+  });
+
+  test('inline block: settings open from its own gear and swap in place', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'append' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    await b.evaluate(`document.querySelector('.rs-inline .rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('.rs-inline').classList.contains('settings-open')`,
+      'the inline panel to open'
+    );
+
+    const state = await b.evaluate(`(() => {
+      const inst = document.querySelector('.rs-inline');
+      return {
+        title: inst.querySelector('.rs-header').textContent,
+        panelShown: getComputedStyle(inst.querySelector('.rs-settings-panel')).display,
+        listHidden: getComputedStyle(inst.querySelector('.rs-content')).display,
+        // Opening the inline panel must NOT open the popup's.
+        popupPanel: document.querySelector('.recent-subreddits-popup').classList.contains('settings-open'),
+      };
+    })()`);
+    assert.equal(state.title, '⚙ Settings', 'the inline header must swap to the settings title');
+    assert.equal(state.panelShown, 'block', 'the inline settings panel must be visible');
+    assert.equal(state.listHidden, 'none', 'the inline list must be hidden while settings is open');
+    assert.equal(state.popupPanel, false, 'the popup must not be affected');
+  });
+
+  test('changing an inline mode relocates the block', async () => {
+    // Start as append, then switch to prepend through the settings UI — the real
+    // write path, so this covers the mode-change reconcile too.
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#content', mode: 'append' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+    assert.equal(
+      await b.evaluate(`document.querySelector('#content').lastElementChild.classList.contains('rs-inline-host')`),
+      true,
+      'starts appended'
+    );
+
+    // Open the popup's settings and change the mode there.
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.recent-subreddits-popup .rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('.recent-subreddits-popup').classList.contains('settings-open')`,
+      'popup settings open'
+    );
+
+    await b.evaluate(`(() => {
+      const sel = document.querySelector('.recent-subreddits-popup [data-role="mode"]');
+      sel.value = 'prepend';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+
+    await b.waitUntil(
+      `document.querySelector('#content').firstElementChild?.classList.contains('rs-inline-host')`,
+      'the block to move to the front after the mode change'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelectorAll('.rs-inline-host').length`),
+      1,
+      'relocating must not duplicate the block'
+    );
+    assert.equal(
+      await b.evaluate(`getComputedStyle(document.querySelector('#content')).visibility`),
+      'visible',
+      'switching between two inline modes must not hide the element'
+    );
+  });
+
+  test('a target whose element is absent on this page mounts nothing, silently', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#does-not-exist', mode: 'append' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.recent-subreddits-popup')`, 'popup mounted');
+    await new Promise((r) => setTimeout(r, 200));
+
+    assert.equal(
+      await b.evaluate(`document.querySelectorAll('.rs-inline-host').length`),
+      0,
+      'nothing should mount for an unmatched selector'
+    );
+    assert.deepEqual(await b.evaluate(`window.__errors`), [], 'a missing element must not throw');
+  });
+
+  test('an invalid stored selector does not break the other targets', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({
+          targets: [
+            { selector: '#content', mode: 'append' },
+            { selector: '::not a selector::', mode: 'append' },
+          ],
+        })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'the valid target to mount');
+    await new Promise((r) => setTimeout(r, 200));
+
+    assert.equal(
+      await b.evaluate(`document.querySelectorAll('.rs-inline-host').length`),
+      1,
+      'the valid target must still mount despite the invalid sibling'
+    );
+    assert.deepEqual(await b.evaluate(`window.__errors`), [], 'an invalid selector must not throw');
   });
 
   test('WARNS once when no trigger selector matches', async () => {
