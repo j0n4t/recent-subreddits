@@ -36,6 +36,27 @@ function findFreePort() {
   });
 }
 
+/**
+ * Drop the session-restore state from a profile.
+ *
+ * Chrome keeps the tabs to restore in Default/Sessions/Session_* and Tabs_*.
+ * `--no-restore-last-session` stops the automatic restore but not the file
+ * write, so a REUSED profile (the manual suite's) still grew by one tab per
+ * run. Deleting these makes every launch start from exactly the pages the
+ * command line asks for.
+ */
+function clearSessionState(profile) {
+  const sessions = join(profile, 'Default', 'Sessions');
+  for (const name of ['Session', 'Tabs']) {
+    try {
+      for (const entry of readdirSync(sessions)) {
+        if (!entry.startsWith(name)) continue;
+        try { rmSync(join(sessions, entry), { force: true }); } catch { /* locked */ }
+      }
+    } catch { /* no Sessions dir yet: nothing to clear */ }
+  }
+}
+
 /** Probe known Chromium locations; an env override wins. Returns null if none. */
 export function findBrowser() {
   // An explicit override is authoritative: if it is set but wrong, that is a
@@ -108,6 +129,9 @@ export class Browser {
     const ownProfile = !userDataDir;
     const profile = userDataDir || mkdtempSync(join(tmpdir(), 'rs-e2e-chrome-'));
 
+    // Before spawning: a reused profile would otherwise reopen last run's tabs.
+    if (!ownProfile) clearSessionState(profile);
+
     const proc = spawn(
       browserPath,
       [
@@ -121,6 +145,12 @@ export class Browser {
         // so it never starts. Harmless for a local, throwaway-profile test browser.
         '--no-sandbox',
         '--disable-dev-shm-usage',
+        // A REUSED profile (the manual suite's) otherwise restores the previous
+        // session's tabs on every launch, so the window accumulates one tab per
+        // run. Both flags are needed: the first stops the restore, the second
+        // stops the "restore pages?" prompt path from re-adding them.
+        '--no-restore-last-session',
+        '--hide-crash-restore-bubble',
         `--user-data-dir=${profile}`,
         `--remote-debugging-port=${cdpPort}`,
         'about:blank',
@@ -205,10 +235,27 @@ export class Browser {
     this.listeners.get(method).push(fn);
   }
 
-  // The browser-level socket has no Page domain: create a page, attach flattened,
-  // and send page commands on the returned sessionId.
+  // The browser-level socket has no Page domain: attach to an existing page
+  // (the `about:blank` passed on the command line), or create one if the
+  // browser came up without any.
+  //
+  // Reusing the existing page matters for the manual suite: creating a target
+  // on every launch left an extra blank tab behind each run.
   async attachPage() {
-    const { targetId } = await this.send('Target.createTarget', { url: 'about:blank' });
+    let targetId = null;
+    try {
+      const { targetInfos } = await this.send('Target.getTargets');
+      const existing = (targetInfos || []).find(
+        (t) => t.type === 'page' && !t.url.startsWith('devtools://')
+      );
+      if (existing) targetId = existing.targetId;
+    } catch {
+      // Older protocol or a transient failure: fall through and create one.
+    }
+    if (!targetId) {
+      ({ targetId } = await this.send('Target.createTarget', { url: 'about:blank' }));
+    }
+
     const { sessionId } = await this.send('Target.attachToTarget', { targetId, flatten: true });
     this.sessionId = sessionId;
 
