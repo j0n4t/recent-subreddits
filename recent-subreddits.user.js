@@ -810,6 +810,38 @@
     refresh(data);
   }
 
+  // src/position.js
+  var POPUP_WIDTH = 280;
+  var GAP = 8;
+  var MARGIN = 16;
+  function positionPopup(popup, trigger) {
+    const rect = trigger.getBoundingClientRect();
+    const popupHeight = popup.offsetHeight || 300;
+    let left = rect.left;
+    if (left + POPUP_WIDTH > window.innerWidth - MARGIN) {
+      left = window.innerWidth - POPUP_WIDTH - MARGIN;
+    }
+    if (left < MARGIN) left = MARGIN;
+    let top = rect.bottom + GAP;
+    if (top + popupHeight > window.innerHeight - MARGIN) {
+      const aboveTop = rect.top - popupHeight - GAP;
+      if (aboveTop >= MARGIN) {
+        top = aboveTop;
+      } else {
+        top = Math.max(MARGIN, Math.min(top, window.innerHeight - popupHeight - MARGIN));
+      }
+    }
+    popup.style.left = left + "px";
+    popup.style.top = top + "px";
+  }
+  function positionPopupCentered(popup) {
+    const height = popup.offsetHeight || 300;
+    const left = Math.max(MARGIN, Math.round((window.innerWidth - POPUP_WIDTH) / 2));
+    const top = Math.max(MARGIN, Math.round((window.innerHeight - height) / 2));
+    popup.style.left = left + "px";
+    popup.style.top = top + "px";
+  }
+
   // src/app.js
   var HEADER_TITLE = { main: "\u{1F4CB} Recent Subreddits", settings: "\u2699 Settings" };
   var sidebarEl = null;
@@ -1229,49 +1261,13 @@
   }
   var activeHotkey = null;
   var lastTrigger = null;
-  function positionPopup(trigger) {
-    if (!popupEl) return;
-    const popup = popupEl;
-    const rect = trigger.getBoundingClientRect();
-    const popupWidth = 280;
-    const popupHeight = popup.offsetHeight || 300;
-    const gap = 8;
-    const margin = 16;
-    let left = rect.left;
-    if (left + popupWidth > window.innerWidth - margin) {
-      left = window.innerWidth - popupWidth - margin;
-    }
-    if (left < margin) left = margin;
-    let top = rect.bottom + gap;
-    if (top + popupHeight > window.innerHeight - margin) {
-      const aboveTop = rect.top - popupHeight - gap;
-      if (aboveTop >= margin) {
-        top = aboveTop;
-      } else {
-        top = Math.max(margin, Math.min(top, window.innerHeight - popupHeight - margin));
-      }
-    }
-    popup.style.left = left + "px";
-    popup.style.top = top + "px";
-  }
-  function positionPopupCentered() {
-    if (!popupEl) return;
-    const popup = popupEl;
-    const width = 280;
-    const height = popup.offsetHeight || 300;
-    const margin = 16;
-    const left = Math.max(margin, Math.round((window.innerWidth - width) / 2));
-    const top = Math.max(margin, Math.round((window.innerHeight - height) / 2));
-    popup.style.left = left + "px";
-    popup.style.top = top + "px";
-  }
   function togglePopup(show, trigger) {
     if (!popupEl) return;
     if (show) {
       if (trigger) lastTrigger = trigger;
       popupEl.classList.add("visible");
-      if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(lastTrigger);
-      else positionPopupCentered();
+      if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(popupEl, lastTrigger);
+      else positionPopupCentered(popupEl);
     } else {
       popupEl.classList.remove("visible");
       setSettingsOpen(false);

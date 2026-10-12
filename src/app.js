@@ -14,6 +14,7 @@ import { escAttr, cachedIcon, fetchSubredditIcon } from './icons.js';
 import { TRIGGER_SELECTOR, checkTriggers } from './diagnostics.js';
 import { injectStyles } from './styles.js';
 import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore } from './visits.js';
+import { positionPopup, positionPopupCentered } from './position.js';
 
 // ---------- Build sidebar element ----------
 // Header label per view: icon + title, swapped when the settings panel opens.
@@ -615,55 +616,6 @@ let activeHotkey = null;
 // without the caller having to pass the trigger again.
 let lastTrigger = null;
 
-// ---------- Popup positioning ----------
-function positionPopup(trigger) {
-  if (!popupEl) return;
-  const popup = popupEl;
-
-  const rect = trigger.getBoundingClientRect();
-  const popupWidth = 280;
-  const popupHeight = popup.offsetHeight || 300;
-  const gap = 8;
-  const margin = 16;
-
-  // Horizontal: align left edge with trigger, clamp to viewport
-  let left = rect.left;
-  if (left + popupWidth > window.innerWidth - margin) {
-    left = window.innerWidth - popupWidth - margin;
-  }
-  if (left < margin) left = margin;
-
-  // Vertical: prefer below trigger, flip above if not enough space
-  let top = rect.bottom + gap;
-  if (top + popupHeight > window.innerHeight - margin) {
-    const aboveTop = rect.top - popupHeight - gap;
-    if (aboveTop >= margin) {
-      top = aboveTop;
-    } else {
-      // Neither fits — clamp to viewport with margin
-      top = Math.max(margin, Math.min(top, window.innerHeight - popupHeight - margin));
-    }
-  }
-
-  popup.style.left = left + 'px';
-  popup.style.top = top + 'px';
-}
-
-// Centre the popup when opened by hotkey (no trigger to anchor to).
-function positionPopupCentered() {
-  if (!popupEl) return;
-  const popup = popupEl;
-  const width = 280;
-  const height = popup.offsetHeight || 300;
-  const margin = 16;
-
-  const left = Math.max(margin, Math.round((window.innerWidth - width) / 2));
-  const top = Math.max(margin, Math.round((window.innerHeight - height) / 2));
-
-  popup.style.left = left + 'px';
-  popup.style.top = top + 'px';
-}
-
 // ---------- Popup toggle ----------
 function togglePopup(show, trigger) {
   if (!popupEl) return;
@@ -672,8 +624,8 @@ function togglePopup(show, trigger) {
     // instead of snapping to the centre.
     if (trigger) lastTrigger = trigger;
     popupEl.classList.add('visible');
-    if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(lastTrigger);
-    else positionPopupCentered();
+    if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(popupEl, lastTrigger);
+    else positionPopupCentered(popupEl);
   } else {
     popupEl.classList.remove('visible');
     // Never leave the settings modal open behind a closed popup.
