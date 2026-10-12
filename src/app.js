@@ -12,92 +12,8 @@ import {
 } from './storage.js';
 
 import { startPicker } from './picker.js';
-
-// ---------- Diagnostics ----------
-// One warn per condition per page, so a broken selector is visible in the
-// console without spamming it. Silent when everything matches, which is the
-// normal case.
-const warned = new Set();
-
-function warnOnce(key, message) {
-  if (warned.has(key)) return;
-  warned.add(key);
-  console.warn(`[recent-subreddits] ${message}`);
-}
-
-// How many elements currently match the popup triggers. 0 means the feature is
-// unreachable by hover/click — the signature of a Reddit markup change.
-function countTriggers() {
-  try {
-    return document.querySelectorAll(TRIGGER_SELECTOR).length;
-  } catch {
-    return 0;
-  }
-}
-
-function checkTriggers() {
-  if (countTriggers() > 0) return;
-  warnOnce(
-    'triggers',
-    `no popup trigger matched on this page (selectors: ${TRIGGER_SELECTOR}). ` +
-    `Hovering the logo will not open the popup. Use the hotkey instead, ` +
-    `and report this so the selectors can be updated.`
-  );
-}
-
-// ---------- Subreddit icon cache ----------
-const DEFAULT_ICON =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%23b8b8b8'/%3E%3C/svg%3E";
-
-const iconCache = {};
-
-function escAttr(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;');
-}
-
-function updateIconInDom(name, icon) {
-  if (!sidebarEl || !icon) return;
-  const encoded = encodeURIComponent(name);
-  // Icons live in every mounted instance: the popup and any inline block.
-  /** @type {NodeListOf<HTMLImageElement>} */
-  const icons = document.querySelectorAll('img.rs-icon');
-  icons.forEach((img) => {
-    if (img.dataset.name === encoded) img.src = icon;
-  });
-}
-
-function fetchSubredditIcon(name) {
-  // `name in iconCache` also covers the placeholder set below, so we never
-  // fire the same request twice (including after a failed fetch).
-  if (name in iconCache) return iconCache[name];
-
-  iconCache[name] = DEFAULT_ICON; // placeholder while loading
-
-  GM_xmlhttpRequest({
-    method: 'GET',
-    url: `https://www.reddit.com/r/${encodeURIComponent(name)}/about.json`,
-    headers: { Accept: 'application/json' },
-    onload(res) {
-      let icon = '';
-      try {
-        const data = JSON.parse(res.responseText);
-        icon = data.data?.icon_img || data.data?.community_icon || '';
-      } catch { /* ignore */ }
-      // Reddit sometimes returns an HTML-escaped URL
-      icon = icon.replace(/&amp;/g, '&');
-      iconCache[name] = icon || DEFAULT_ICON;
-      updateIconInDom(name, iconCache[name]);
-    },
-    onerror() {
-      iconCache[name] = DEFAULT_ICON;
-    },
-  });
-
-  return DEFAULT_ICON;
-}
+import { escAttr, cachedIcon, fetchSubredditIcon } from './icons.js';
+import { TRIGGER_SELECTOR, checkTriggers } from './diagnostics.js';
 
 // ---------- Extract subreddit from URL ----------
 function getSubredditFromUrl() {
@@ -229,7 +145,7 @@ function renderContent(data, instance) {
     html += '<div class="rs-section-title">📌 Pinned</div>';
     html += '<ul class="rs-list">';
     for (const name of pinned) {
-      const icon = iconCache[name] || DEFAULT_ICON;
+      const icon = cachedIcon(name);
       html += `<li class="rs-item rs-pinned">`;
       html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(name))}" src="${escAttr(icon)}" alt="" />`;
       html += `<a href="/r/${encodeURIComponent(name)}" class="rs-link">r/${name}</a>`;
@@ -247,7 +163,7 @@ function renderContent(data, instance) {
     html += '<ul class="rs-list">';
     for (const sub of recentFiltered) {
       const timeAgo = formatTimeAgo(sub.visitedAt);
-      const icon = iconCache[sub.name] || DEFAULT_ICON;
+      const icon = cachedIcon(sub.name);
       html += `<li class="rs-item">`;
       html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(sub.name))}" src="${escAttr(icon)}" alt="" />`;
       html += `<a href="/r/${encodeURIComponent(sub.name)}" class="rs-link">r/${sub.name}</a>`;
@@ -262,9 +178,10 @@ function renderContent(data, instance) {
 
   content.innerHTML = html;
 
-  // Fetch icons for any entries missing one
+  // Fetch icons for any entries missing one. fetchSubredditIcon() no-ops for a
+  // name already cached, so no guard is needed here.
   [...pinned, ...recentFiltered.map((s) => s.name)].forEach((name) => {
-    if (!iconCache[name]) fetchSubredditIcon(name);
+    fetchSubredditIcon(name, () => !!sidebarEl);
   });
 }
 
@@ -1203,21 +1120,6 @@ function isPopupVisible() {
 }
 
 // ---------- Mount popup ----------
-// Combined selector for every element that should trigger the popup.
-// Used with Element.closest() so listeners can live on `document` instead of
-// on the trigger nodes — the host re-renders its header on SPA navigation and
-// would otherwise swap in replacement nodes that carry no listeners.
-const TRIGGER_SELECTOR = [
-  'a[href="/"]',                       // Reddit logo link
-  '#header-logo',                      // Old Reddit logo
-  '.header-logo',                      // Alternative logo class
-  '[data-testid="top-nav-logo"]',      // New Reddit logo
-  'button[aria-label*="menu" i]',      // Menu button
-  '#TopNav button',                    // Top nav button area
-  '#reddit-logo',
-  '#navbar-menu-button',
-].join(', ');
-
 /**
  * Resolve an event target to `{el, events}` if it is a popup trigger, else null.
  * A user hook wins over the built-in selectors so its own event choice applies.

@@ -293,7 +293,65 @@
     document.addEventListener("scroll", pickerMove, true);
   }
 
-  // src/app.js
+  // src/icons.js
+  var DEFAULT_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%23b8b8b8'/%3E%3C/svg%3E";
+  var iconCache = {};
+  function escAttr(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  }
+  function cachedIcon(name) {
+    return iconCache[name] || DEFAULT_ICON;
+  }
+  function updateIconInDom(name, icon, isMounted) {
+    if (!isMounted() || !icon) return;
+    const encoded = encodeURIComponent(name);
+    const icons = document.querySelectorAll("img.rs-icon");
+    icons.forEach((img) => {
+      if (img.dataset.name === encoded) img.src = icon;
+    });
+  }
+  function fetchSubredditIcon(name, isMounted) {
+    if (name in iconCache) return iconCache[name];
+    iconCache[name] = DEFAULT_ICON;
+    GM_xmlhttpRequest({
+      method: "GET",
+      url: `https://www.reddit.com/r/${encodeURIComponent(name)}/about.json`,
+      headers: { Accept: "application/json" },
+      onload(res) {
+        let icon = "";
+        try {
+          const data = JSON.parse(res.responseText);
+          icon = data.data?.icon_img || data.data?.community_icon || "";
+        } catch {
+        }
+        icon = icon.replace(/&amp;/g, "&");
+        iconCache[name] = icon || DEFAULT_ICON;
+        updateIconInDom(name, iconCache[name], isMounted);
+      },
+      onerror() {
+        iconCache[name] = DEFAULT_ICON;
+      }
+    });
+    return DEFAULT_ICON;
+  }
+
+  // src/diagnostics.js
+  var TRIGGER_SELECTOR = [
+    'a[href="/"]',
+    // Reddit logo link
+    "#header-logo",
+    // Old Reddit logo
+    ".header-logo",
+    // Alternative logo class
+    '[data-testid="top-nav-logo"]',
+    // New Reddit logo
+    'button[aria-label*="menu" i]',
+    // Menu button
+    "#TopNav button",
+    // Top nav button area
+    "#reddit-logo",
+    "#navbar-menu-button"
+  ].join(", ");
   var warned = /* @__PURE__ */ new Set();
   function warnOnce(key, message) {
     if (warned.has(key)) return;
@@ -314,43 +372,8 @@
       `no popup trigger matched on this page (selectors: ${TRIGGER_SELECTOR}). Hovering the logo will not open the popup. Use the hotkey instead, and report this so the selectors can be updated.`
     );
   }
-  var DEFAULT_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%23b8b8b8'/%3E%3C/svg%3E";
-  var iconCache = {};
-  function escAttr(s) {
-    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-  }
-  function updateIconInDom(name, icon) {
-    if (!sidebarEl || !icon) return;
-    const encoded = encodeURIComponent(name);
-    const icons = document.querySelectorAll("img.rs-icon");
-    icons.forEach((img) => {
-      if (img.dataset.name === encoded) img.src = icon;
-    });
-  }
-  function fetchSubredditIcon(name) {
-    if (name in iconCache) return iconCache[name];
-    iconCache[name] = DEFAULT_ICON;
-    GM_xmlhttpRequest({
-      method: "GET",
-      url: `https://www.reddit.com/r/${encodeURIComponent(name)}/about.json`,
-      headers: { Accept: "application/json" },
-      onload(res) {
-        let icon = "";
-        try {
-          const data = JSON.parse(res.responseText);
-          icon = data.data?.icon_img || data.data?.community_icon || "";
-        } catch {
-        }
-        icon = icon.replace(/&amp;/g, "&");
-        iconCache[name] = icon || DEFAULT_ICON;
-        updateIconInDom(name, iconCache[name]);
-      },
-      onerror() {
-        iconCache[name] = DEFAULT_ICON;
-      }
-    });
-    return DEFAULT_ICON;
-  }
+
+  // src/app.js
   function getSubredditFromUrl() {
     const path = window.location.pathname;
     const match = path.match(/^\/r\/([^/]+)/i);
@@ -440,7 +463,7 @@
       html += '<div class="rs-section-title">\u{1F4CC} Pinned</div>';
       html += '<ul class="rs-list">';
       for (const name of pinned) {
-        const icon = iconCache[name] || DEFAULT_ICON;
+        const icon = cachedIcon(name);
         html += `<li class="rs-item rs-pinned">`;
         html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(name))}" src="${escAttr(icon)}" alt="" />`;
         html += `<a href="/r/${encodeURIComponent(name)}" class="rs-link">r/${name}</a>`;
@@ -456,7 +479,7 @@
       html += '<ul class="rs-list">';
       for (const sub of recentFiltered) {
         const timeAgo = formatTimeAgo(sub.visitedAt);
-        const icon = iconCache[sub.name] || DEFAULT_ICON;
+        const icon = cachedIcon(sub.name);
         html += `<li class="rs-item">`;
         html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(sub.name))}" src="${escAttr(icon)}" alt="" />`;
         html += `<a href="/r/${encodeURIComponent(sub.name)}" class="rs-link">r/${sub.name}</a>`;
@@ -470,7 +493,7 @@
     }
     content.innerHTML = html;
     [...pinned, ...recentFiltered.map((s) => s.name)].forEach((name) => {
-      if (!iconCache[name]) fetchSubredditIcon(name);
+      fetchSubredditIcon(name, () => !!sidebarEl);
     });
   }
   function renderSettings(instance) {
@@ -1248,22 +1271,6 @@
   function isPopupVisible() {
     return !!popupEl && popupEl.classList.contains("visible");
   }
-  var TRIGGER_SELECTOR = [
-    'a[href="/"]',
-    // Reddit logo link
-    "#header-logo",
-    // Old Reddit logo
-    ".header-logo",
-    // Alternative logo class
-    '[data-testid="top-nav-logo"]',
-    // New Reddit logo
-    'button[aria-label*="menu" i]',
-    // Menu button
-    "#TopNav button",
-    // Top nav button area
-    "#reddit-logo",
-    "#navbar-menu-button"
-  ].join(", ");
   function resolveTrigger(target) {
     if (!target || typeof target.closest !== "function") return null;
     for (const t of hookTargets()) {
