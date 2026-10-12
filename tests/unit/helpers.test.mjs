@@ -1,6 +1,10 @@
 // Unit tests: no browser, no network. These must stay green on a machine
 // without Chromium, which is why the e2e suite lives in its own tree/script.
 //
+// The helpers are imported from src/ directly. Before the source was split into
+// modules the tests had to brace-match functions out of the built userscript,
+// because it was one IIFE with no exports.
+//
 // Run:  npm test
 
 import { test, describe } from 'node:test';
@@ -9,33 +13,23 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { parseHotkey, hotkeyMatches, comboFromEvent } from '../../src/hotkey.js';
+import { formatTimeAgo } from '../../src/time.js';
+import { getSubredditFromUrl } from '../../src/visits.js';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = join(HERE, '..', '..', 'recent-subreddits.user.js');
-const source = readFileSync(SRC, 'utf8');
-
-/**
- * Extract a top-level `function name(...) {...}` body from the userscript and
- * evaluate it in isolation. The script is a single IIFE with no exports, so this
- * is how a pure helper gets unit-tested without restructuring it.
- */
-function extractFunction(name) {
-  const start = source.indexOf(`function ${name}(`);
-  assert.notEqual(start, -1, `function ${name} not found in the userscript`);
-
-  let depth = 0;
-  let i = source.indexOf('{', start);
-  for (; i < source.length; i++) {
-    if (source[i] === '{') depth++;
-    else if (source[i] === '}') {
-      depth--;
-      if (depth === 0) break;
-    }
-  }
-  const text = source.slice(start, i + 1);
-  return new Function(`return (${text})`)();
-}
+const BUILT = join(HERE, '..', '..', 'recent-subreddits.user.js');
 
 describe('metadata block', () => {
+  // Read the BUILT file, not src/userscript.meta.js: the grants that matter are
+  // the ones Tampermonkey actually sees, and the banner is only prepended at
+  // build time. This catches a banner that fails to land.
+  const source = readFileSync(BUILT, 'utf8');
+
+  test('the metadata block is the very first thing in the built file', () => {
+    assert.match(source, /^\/\/ ==UserScript==/, 'Tampermonkey only reads a banner at the top');
+  });
+
   test('declares every GM_* API the script calls', () => {
     const meta = source.slice(0, source.indexOf('==/UserScript=='));
     const granted = new Set(
@@ -55,7 +49,6 @@ describe('metadata block', () => {
 });
 
 describe('formatTimeAgo', () => {
-  const formatTimeAgo = extractFunction('formatTimeAgo');
   const now = Date.now();
 
   test('renders each unit at its boundary', () => {
@@ -77,15 +70,16 @@ describe('formatTimeAgo', () => {
 
 describe('getSubredditFromUrl', () => {
 
-  /** Re-evaluate the function with a stubbed location. */
+  /** Call the real function with a stubbed location. */
   function withPath(path) {
-    const src = source.slice(
-      source.indexOf('function getSubredditFromUrl('),
-      source.indexOf('function trackVisit(')
-    );
-    return new Function('window', `${src}\nreturn getSubredditFromUrl();`)({
-      location: { pathname: path },
-    });
+    const prev = globalThis.window;
+    globalThis.window = { location: { pathname: path } };
+    try {
+      return getSubredditFromUrl();
+    } finally {
+      if (prev === undefined) delete globalThis.window;
+      else globalThis.window = prev;
+    }
   }
 
   test('extracts and lowercases the subreddit name', () => {
@@ -102,9 +96,6 @@ describe('getSubredditFromUrl', () => {
 });
 
 describe('hotkey parsing', () => {
-  const parseHotkey = extractFunction('parseHotkey');
-  const hotkeyMatches = extractFunction('hotkeyMatches');
-
   test('parses a modifier + key combo', () => {
     assert.deepEqual(parseHotkey('Alt+Shift+R'), {
       ctrl: false,
@@ -152,6 +143,31 @@ describe('hotkey parsing', () => {
     assert.equal(
       hotkeyMatches({ key: 'a', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }, null),
       false
+    );
+  });
+
+  test('round-trips a keydown into a stored combo string', () => {
+    // The settings field stores what comboFromEvent() produces, and the global
+    // handler compares against parseHotkey(). If the two disagree, a captured
+    // hotkey silently never fires — the exact bug the module split caused once,
+    // so it is pinned down here.
+    const event = { key: 'k', ctrlKey: true, altKey: false, shiftKey: true, metaKey: false };
+    const combo = comboFromEvent(event);
+    assert.equal(combo, 'Ctrl+Shift+K');
+    assert.deepEqual(parseHotkey(combo), {
+      ctrl: true,
+      alt: false,
+      shift: true,
+      meta: false,
+      key: 'k',
+    });
+    assert.equal(hotkeyMatches(event, parseHotkey(combo)), true);
+  });
+
+  test('a modifier-only keydown yields no combo', () => {
+    assert.equal(
+      comboFromEvent({ key: 'Shift', ctrlKey: false, altKey: false, shiftKey: true, metaKey: false }),
+      null
     );
   });
 });
