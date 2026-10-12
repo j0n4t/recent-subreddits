@@ -1112,7 +1112,12 @@
       const handle = document.createElement("div");
       handle.className = "rs-resize-handle";
       host.appendChild(handle);
+      let promoted = false;
       if (mode === "replace") {
+        if (getComputedStyle(el).position === "static") {
+          el.style.position = "relative";
+          promoted = true;
+        }
         el.style.visibility = "hidden";
         el.appendChild(host);
       } else if (mode === "prepend") {
@@ -1125,7 +1130,7 @@
         if (target.size.width) inst.style.width = target.size.width;
         if (target.size.height) inst.style.maxHeight = target.size.height;
       }
-      rec = { el, host, mode };
+      rec = { el, host, mode, promoted };
       inlineInstances.set(selector, rec);
       wireInlineInstance(rec, target);
     }
@@ -1205,6 +1210,7 @@
       const stillWanted = wanted.some((t) => t.selector === selector);
       if (!stillWanted) {
         if (rec.el && rec.el.style.visibility === "hidden") rec.el.style.visibility = "";
+        if (rec.promoted && rec.el) rec.el.style.position = "";
         rec.host.remove();
         inlineInstances.delete(selector);
       }

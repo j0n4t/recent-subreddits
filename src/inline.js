@@ -111,7 +111,18 @@ function mountInlineInstance(target) {
     host.appendChild(handle);
 
     // Placement relative to the picked element.
+    // `promoted` records a position we set ourselves, so teardown only undoes
+    // our own change and never a value the page owns.
+    let promoted = false;
     if (mode === 'replace') {
+      // The host is position:absolute, so it resolves against the nearest
+      // POSITIONED ancestor — and the picked element is usually static, as are
+      // its ancestors. Without this the block lands at the page origin while
+      // the element it replaced sits hidden somewhere else.
+      if (getComputedStyle(el).position === 'static') {
+        el.style.position = 'relative';
+        promoted = true;
+      }
       // Nest inside the element and overlap it — avoids leaving a gap
       // in the document flow where the hidden element used to be.
       el.style.visibility = 'hidden';
@@ -130,7 +141,7 @@ function mountInlineInstance(target) {
       if (target.size.height) inst.style.maxHeight = target.size.height;
     }
 
-    rec = { el, host, mode };
+    rec = { el, host, mode, promoted };
     inlineInstances.set(selector, rec);
     wireInlineInstance(rec, target);
   }
@@ -238,6 +249,9 @@ export function applyTargets() {
     if (!stillWanted) {
       // Un-hide the element we replaced, or it stays invisible forever.
       if (rec.el && rec.el.style.visibility === 'hidden') rec.el.style.visibility = '';
+      // Drop a containing block we established, but only ours — an element the
+      // page positioned itself must keep its value.
+      if (rec.promoted && rec.el) rec.el.style.position = '';
       rec.host.remove();
       inlineInstances.delete(selector);
     }

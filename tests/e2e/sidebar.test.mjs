@@ -1024,6 +1024,120 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
   });
 
+  test('inline replace: the block renders over the element it replaced, not at the page origin', async () => {
+    // A replace host is position:absolute, so its containing block is the
+    // nearest POSITIONED ancestor. The picked element is usually static (and so
+    // are its ancestors), which sends the block to the page origin while the
+    // element it replaced is hidden — the user sees a blank gap and a stray
+    // panel. Structure assertions cannot see this; only geometry can.
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'replace' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    const geo = await b.evaluate(`(() => {
+      const el = document.querySelector('#pick-target');
+      const inst = document.querySelector('.rs-inline');
+      const eb = el.getBoundingClientRect();
+      const ib = inst.getBoundingClientRect();
+      const cx = Math.round(eb.left + eb.width / 2);
+      const cy = Math.round(eb.top + eb.height / 2);
+      // The decisive question: what is painted where the element was?
+      const hit = document.elementFromPoint(cx, cy);
+      return {
+        el: { t: Math.round(eb.top), l: Math.round(eb.left), w: Math.round(eb.width), h: Math.round(eb.height) },
+        block: { t: Math.round(ib.top), l: Math.round(ib.left), w: Math.round(ib.width), h: Math.round(ib.height) },
+        dx: Math.round(ib.left - eb.left),
+        dy: Math.round(ib.top - eb.top),
+        hitIsBlock: !!hit && (inst === hit || inst.contains(hit)),
+        hitTag: hit ? hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') : null,
+      };
+    })()`);
+
+    assert.ok(
+      Math.abs(geo.dx) <= 2 && Math.abs(geo.dy) <= 2,
+      `the block must render over the element it replaced, got ${JSON.stringify(geo)}`
+    );
+    assert.equal(
+      geo.hitIsBlock,
+      true,
+      `a click at the replaced element's centre must land on the block, got ${geo.hitTag}`
+    );
+  });
+
+  test('inline replace: makes a static element a containing block, and undoes it on teardown', async () => {
+    // The mechanism behind the test above: a static element cannot contain an
+    // absolutely-positioned child, so the mount promotes it to `relative` — and
+    // must put it back, or the host page keeps a stacking/containing change it
+    // never asked for.
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'replace' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    assert.equal(
+      await b.evaluate(`getComputedStyle(document.querySelector('#pick-target')).position`),
+      'relative',
+      'a static replace target must be promoted to a containing block'
+    );
+
+    // Drop the binding: the element goes back to how the page had it.
+    await b.evaluate(`document.querySelector('.rs-inline .rs-close-btn').click()`);
+    await b.waitUntil(`!document.querySelector('.rs-inline-host')`, 'the block to be removed');
+
+    assert.equal(
+      await b.evaluate(`document.querySelector('#pick-target').style.position`),
+      '',
+      'the promoted position must be reverted on teardown'
+    );
+    assert.equal(
+      await b.evaluate(`getComputedStyle(document.querySelector('#pick-target')).position`),
+      'static',
+      'the element must return to its original static position'
+    );
+  });
+
+  test('inline replace: does NOT override a target that already positions itself', async () => {
+    // An element the page already positioned must keep its own value. The
+    // fixture sets this one to `relative` as an inline style, so the check is
+    // that we did not *replace* it — and that teardown leaves it intact.
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#positioned-target', mode: 'replace' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    assert.equal(
+      await b.evaluate(`document.querySelector('#positioned-target').style.position`),
+      'relative',
+      "the page's own positioning must be left exactly as it was"
+    );
+    // And the block still lands on it — no promotion was needed.
+    const geo = await b.evaluate(`(() => {
+      const el = document.querySelector('#positioned-target').getBoundingClientRect();
+      const inst = document.querySelector('.rs-inline').getBoundingClientRect();
+      return { dx: Math.round(inst.left - el.left), dy: Math.round(inst.top - el.top) };
+    })()`);
+    assert.ok(
+      Math.abs(geo.dx) <= 2 && Math.abs(geo.dy) <= 2,
+      `the block must overlap an already-positioned element, got ${JSON.stringify(geo)}`
+    );
+
+    // Teardown must not clear a value it did not set.
+    await b.evaluate(`document.querySelector('.rs-inline .rs-close-btn').click()`);
+    await b.waitUntil(`!document.querySelector('.rs-inline-host')`, 'the block to be removed');
+    assert.equal(
+      await b.evaluate(`document.querySelector('#positioned-target').style.position`),
+      'relative',
+      'teardown must not strip positioning the page set itself'
+    );
+  });
+
   test('inline prepend: inserts the UI as the first child, element untouched', async () => {
     await b.goto(
       fixtureUrl(DEFAULT_SEED) +

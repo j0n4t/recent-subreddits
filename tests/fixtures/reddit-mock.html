@@ -20,10 +20,14 @@
   </header>
   <main id="content">
     mock page body
-    <!-- A plain element that is NOT a built-in trigger: the picker's target. -->
+    <!-- A plain element that is NOT a built-in trigger: the picker's target.
+         Deliberately position:static, like most real Reddit content, so a
+         replace has to establish its own containing block. -->
     <div id="pick-target" data-testid="pick-me">pick me</div>
     <!-- No id: the picker must fall back to the data-testid. -->
     <div data-testid="testid-only">testid only</div>
+    <!-- Already positioned: a replace must leave its own value alone. -->
+    <div id="positioned-target" style="position: relative">already positioned</div>
     <div class="hashed-x1y2z3">
       <span class="leaf">deep child</span>
     </div>
