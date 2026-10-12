@@ -11,6 +11,9 @@
     "pretest:e2e": "npm run build",
     "test:e2e": "node --test \"tests/e2e/*.test.mjs\"",
     "test:all": "npm test && npm run test:e2e",
+    "pretest:real": "npm run build",
+    "test:real": "node tests/manual/interactions.test.mjs",
+    "test:real:offline": "node tests/manual/interactions.test.mjs --offline",
     "lint": "eslint .",
     "typecheck": "tsc",
     "check": "npm run lint && npm run typecheck && npm run test:all"

@@ -87,20 +87,31 @@ export class Browser {
     this.listeners = new Map();
     this.sessionId = null;
     this.loadWaiter = null;
+    // Set by launch(): true when the profile must outlive this process.
+    this.keepProfile = false;
   }
 
-  static async launch() {
+  /**
+   * Launch a browser.
+   *
+   * `headful` shows a real window (for the manual suite, where a person drives
+   * the interactions). `userDataDir` reuses a profile across runs — the manual
+   * suite points it at a persistent dir so Reddit's JS challenge is cleared
+   * once and stays cleared. Defaults keep the automated suite exactly as it
+   * was: headless, throwaway profile, deleted on stop().
+   */
+  static async launch({ headful = false, userDataDir = null, keepProfile = false } = {}) {
     const browserPath = findBrowser();
     if (!browserPath) return null;
 
     const cdpPort = await findFreePort();
-    const userDataDir = mkdtempSync(join(tmpdir(), 'rs-e2e-chrome-'));
+    const ownProfile = !userDataDir;
+    const profile = userDataDir || mkdtempSync(join(tmpdir(), 'rs-e2e-chrome-'));
 
     const proc = spawn(
       browserPath,
       [
-        '--headless=new',
-        '--disable-gpu',
+        ...(headful ? ['--start-maximized'] : ['--headless=new', '--disable-gpu']),
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-extensions',
@@ -110,7 +121,7 @@ export class Browser {
         // so it never starts. Harmless for a local, throwaway-profile test browser.
         '--no-sandbox',
         '--disable-dev-shm-usage',
-        `--user-data-dir=${userDataDir}`,
+        `--user-data-dir=${profile}`,
         `--remote-debugging-port=${cdpPort}`,
         'about:blank',
       ],
@@ -153,7 +164,8 @@ export class Browser {
       ws.addEventListener('error', reject, { once: true });
     });
 
-    const b = new Browser(proc, ws, userDataDir, cdpPort);
+    const b = new Browser(proc, ws, profile, cdpPort);
+    b.keepProfile = keepProfile || !ownProfile;
 
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
@@ -255,8 +267,34 @@ export class Browser {
     try { await this.send('Browser.close'); } catch { /* already gone */ }
     await delay(300);
     if (this.proc.exitCode === null && this.proc.signalCode === null) this.proc.kill();
-    // Windows holds handles briefly; retry so cleanup cannot mask results.
-    try { rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5 }); }
-    catch { /* ignore: a leaked profile must not fail an otherwise green run */ }
+
+    // Wait for the process to actually exit before touching its profile:
+    // Browser.close returns immediately, and Windows keeps every handle in the
+    // profile locked until the process is really gone, so an immediate rmSync
+    // silently leaves the directory behind.
+    const deadline = Date.now() + 8000;
+    while (this.proc.exitCode === null && this.proc.signalCode === null && Date.now() < deadline) {
+      await delay(150);
+    }
+
+    // Never delete a profile we did not create: the manual suite reuses one so
+    // a cleared Reddit challenge survives between runs.
+    if (this.keepProfile) return;
+    this.removeProfile();
+  }
+
+  /** Remove a throwaway profile, retrying while Windows releases its handles. */
+  removeProfile() {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 2 });
+        return;
+      } catch {
+        // Held briefly; the next attempt usually wins.
+      }
+    }
+    // A leaked profile must not fail an otherwise green run, but say so rather
+    // than hiding it — otherwise temp dirs accumulate unnoticed.
+    console.warn(`[e2e] could not remove the profile at ${this.userDataDir}`);
   }
 }

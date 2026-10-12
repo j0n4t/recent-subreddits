@@ -114,6 +114,34 @@ npm run check    # lint + typecheck + both suites
 never drift from `src/`. The build is deterministic — rebuilding an unchanged
 tree produces no diff.
 
+### Manual test against the real site
+
+The automated suite runs against a local fixture, so it can only assert things
+about markup we wrote ourselves. That is not enough: real Reddit has already
+produced a bug the fixture could not see (a replace-mode block rendering at the
+page origin instead of over its element).
+
+```bash
+npm run test:real           # headful browser, real www.reddit.com, you confirm each step
+npm run test:real:offline   # same interactions against the local fixture
+```
+
+It opens a visible browser, drives the key interactions with a **real pointer**
+(synthetic events bypass hit-testing, which is how "passes in tests, dead on the
+site" bugs hide), and pauses at each step for you to answer `y` / `n` / `s`.
+Geometry that can be measured is checked automatically and marked `[measured]`.
+
+Notes:
+
+- Live mode injects the userscript into reddit.com with the `GM_*` APIs stubbed,
+  because a headful browser here has no userscript manager installed.
+- Reddit may show "blocked by network security" on the first run. Solve it in the
+  window once — the profile is persistent (`.manual-profile/`) so it stays solved.
+- The browser closes itself if stdin is not interactive, so a piped run cannot
+  leak a window. `Ctrl-C` also cleans up.
+- The run prints its CDP port, so you can attach DevTools or a script while it is
+  paused on a question.
+
 The e2e suite loads the built userscript into `tests/fixtures/reddit-mock.html`,
 which mimics the Reddit markup the script anchors to and stubs `GM_getValue`,
 `GM_setValue` and `GM_xmlhttpRequest`. **It never contacts reddit.com**, so bot

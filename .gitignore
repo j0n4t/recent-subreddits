@@ -1,1 +1,4 @@
 node_modules
+
+# The manual suite's persistent browser profile (holds a cleared reddit session)
+.manual-profile/
