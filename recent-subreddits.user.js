@@ -778,7 +778,7 @@
     document.head.appendChild(style);
   }
 
-  // src/app.js
+  // src/visits.js
   function getSubredditFromUrl() {
     const path = window.location.pathname;
     const match = path.match(/^\/r\/([^/]+)/i);
@@ -798,7 +798,7 @@
     data.recent = data.recent.slice(0, MAX_RECENT);
     saveData(data);
   }
-  function togglePin(name) {
+  function togglePin(name, refresh) {
     const data = loadData();
     const pinIndex = data.pinned.indexOf(name);
     if (pinIndex >= 0) {
@@ -807,22 +807,29 @@
       data.pinned.unshift(name);
     }
     saveData(data);
-    renderContent(data);
-    refreshInlineInstances();
+    refresh(data);
   }
-  function refreshInlineInstances() {
-    const data = loadData();
-    for (const rec of inlineInstances.values()) {
-      if (!document.body.contains(rec.host)) continue;
-      renderContent(data, rec.host.querySelector(".rs-inline"));
-    }
-  }
+
+  // src/app.js
   var HEADER_TITLE = { main: "\u{1F4CB} Recent Subreddits", settings: "\u2699 Settings" };
   var sidebarEl = null;
   var popupEl = null;
   var settingsOpen = false;
   function isSettingsOpen() {
     return settingsOpen;
+  }
+  function refreshInlineInstances(data) {
+    for (const rec of inlineInstances.values()) {
+      if (!document.body.contains(rec.host)) continue;
+      renderContent(data, rec.host.querySelector(".rs-inline"));
+    }
+  }
+  function refreshAll(data) {
+    renderContent(data);
+    refreshInlineInstances(data);
+  }
+  function togglePin2(name) {
+    togglePin(name, refreshAll);
   }
   function buildPopupShell() {
     const popup = document.createElement("div");
@@ -1170,7 +1177,7 @@
       const pin = e.target.closest(".rs-pin-btn, .rs-unpin-btn");
       if (pin) {
         e.stopPropagation();
-        togglePin(pin.dataset.name);
+        togglePin2(pin.dataset.name);
         return;
       }
       if (e.target.closest(".rs-close-btn")) {
@@ -1317,7 +1324,7 @@
       const pin = e.target.closest(".rs-pin-btn, .rs-unpin-btn");
       if (pin) {
         e.stopPropagation();
-        togglePin(pin.dataset.name);
+        togglePin2(pin.dataset.name);
         return;
       }
       if (e.target.closest(".rs-close-btn")) {

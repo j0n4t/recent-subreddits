@@ -3,11 +3,9 @@ import { parseHotkey, hotkeyMatches, comboFromEvent } from './hotkey.js';
 import { formatTimeAgo } from './time.js';
 import {
   loadData,
-  saveData,
   loadSettings,
   saveSettings,
   hookTargets,
-  MAX_RECENT,
   DEFAULT_SETTINGS,
 } from './storage.js';
 
@@ -15,57 +13,7 @@ import { startPicker } from './picker.js';
 import { escAttr, cachedIcon, fetchSubredditIcon } from './icons.js';
 import { TRIGGER_SELECTOR, checkTriggers } from './diagnostics.js';
 import { injectStyles } from './styles.js';
-
-// ---------- Extract subreddit from URL ----------
-function getSubredditFromUrl() {
-  const path = window.location.pathname;
-  // Matches /r/subreddit/... or /r/subreddit
-  const match = path.match(/^\/r\/([^/]+)/i);
-  if (match) {
-    const name = match[1];
-    // Skip special entries like "friends", "popular", "all" if desired — keep them for now
-    return name.toLowerCase();
-  }
-  return null;
-}
-
-// ---------- Track subreddit visit ----------
-function trackVisit(name) {
-  const data = loadData();
-  // Remove if already in recent (will re-add at top)
-  data.recent = data.recent.filter((s) => s.name !== name);
-  data.recent.unshift({
-    name,
-    visitedAt: Date.now(),
-  });
-  // Trim
-  data.recent = data.recent.slice(0, MAX_RECENT);
-  saveData(data);
-}
-
-// ---------- Toggle pin ----------
-function togglePin(name) {
-  const data = loadData();
-  const pinIndex = data.pinned.indexOf(name);
-  if (pinIndex >= 0) {
-    data.pinned.splice(pinIndex, 1);
-  } else {
-    data.pinned.unshift(name);
-  }
-  saveData(data);
-  // Refresh every mounted instance, not just the popup.
-  renderContent(data);
-  refreshInlineInstances();
-}
-
-/** Re-render the list inside every mounted inline block. */
-function refreshInlineInstances() {
-  const data = loadData();
-  for (const rec of inlineInstances.values()) {
-    if (!document.body.contains(rec.host)) continue;
-    renderContent(data, rec.host.querySelector('.rs-inline'));
-  }
-}
+import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore } from './visits.js';
 
 // ---------- Build sidebar element ----------
 // Header label per view: icon + title, swapped when the settings panel opens.
@@ -77,6 +25,28 @@ let settingsOpen = false;
 
 function isSettingsOpen() {
   return settingsOpen;
+}
+
+/** Re-render the list inside every mounted inline block. */
+function refreshInlineInstances(data) {
+  for (const rec of inlineInstances.values()) {
+    if (!document.body.contains(rec.host)) continue;
+    renderContent(data, rec.host.querySelector('.rs-inline'));
+  }
+}
+
+/**
+ * Re-render every mounted instance after a store write: the popup and each
+ * inline block. Passed to the store layer, which does not know about the DOM.
+ */
+function refreshAll(data) {
+  renderContent(data);
+  refreshInlineInstances(data);
+}
+
+/** Toggle a pin and repaint every instance showing it. */
+function togglePin(name) {
+  togglePinInStore(name, refreshAll);
 }
 
 /**
