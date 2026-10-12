@@ -139,8 +139,8 @@
     warnOnce(
       'triggers',
       `no popup trigger matched on this page (selectors: ${TRIGGER_SELECTOR}). ` +
-        `Hovering the logo will not open the popup. Use the hotkey instead, ` +
-        `and report this so the selectors can be updated.`
+      `Hovering the logo will not open the popup. Use the hotkey instead, ` +
+      `and report this so the selectors can be updated.`
     );
   }
 
@@ -236,6 +236,9 @@
   }
 
   // ---------- Build sidebar element ----------
+  // Header label per view: icon + title, swapped when the settings panel opens.
+  const HEADER_TITLE = { main: '📋 Recent Subreddits', settings: '⚙ Settings' };
+
   let sidebarEl = null;
   let popupEl = null; // persistent; rebuilt content goes inside #rs-content
   let settingsOpen = false;
@@ -265,7 +268,13 @@
 
     const title = document.createElement('h3');
     title.className = 'rs-header';
-    title.textContent = '📋 Recent Subreddits';
+    title.textContent = HEADER_TITLE.main;
+
+    const back = document.createElement('button');
+    back.className = 'rs-back-btn';
+    back.id = 'rs-back';
+    back.title = 'Back';
+    back.textContent = '←';
 
     const gear = document.createElement('button');
     gear.className = 'rs-settings-btn';
@@ -273,7 +282,7 @@
     gear.title = 'Settings';
     gear.textContent = '⚙';
 
-    header.append(title, gear);
+    header.append(back, title, gear, close);
 
     const content = document.createElement('div');
     content.className = 'rs-content';
@@ -283,7 +292,7 @@
     settings.className = 'rs-settings-panel';
     settings.id = 'rs-settings-panel';
 
-    popup.append(close, header, content, settings);
+    popup.append(header, content, settings);
     return popup;
   }
 
@@ -428,6 +437,8 @@
     if (!popupEl) return;
 
     popupEl.classList.toggle('settings-open', open);
+    const title = popupEl.querySelector('.rs-header');
+    if (title) title.textContent = open ? HEADER_TITLE.settings : HEADER_TITLE.main;
     if (open) renderSettings();
   }
 
@@ -513,7 +524,6 @@
       .rs-header-row {
         display: flex;
         align-items: center;
-        justify-content: space-between;
         gap: 8px;
         margin: 0 0 8px 0;
       }
@@ -523,6 +533,19 @@
         font-weight: 600;
         color: var(--rs-text);
       }
+      .rs-back-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 4px;
+        font-size: 14px;
+        line-height: 1;
+        color: var(--rs-text-muted);
+        display: none;
+        transition: color 0.15s;
+      }
+      .rs-back-btn:hover { color: var(--rs-text); }
+      .recent-subreddits-popup.settings-open .rs-back-btn { display: block; }
       .rs-settings-btn {
         background: none;
         border: none;
@@ -534,6 +557,8 @@
         color: var(--rs-text);
         transition: opacity 0.15s, transform 0.2s;
       }
+      /* The gear is redundant next to the "⚙ Settings" title; back is the way out. */
+      .recent-subreddits-popup.settings-open .rs-settings-btn { display: none; }
       .rs-settings-btn:hover { opacity: 1; transform: rotate(30deg); }
 
       /* ---- Settings modal ---- */
@@ -577,7 +602,7 @@
       .rs-status {
         font-size: 11px;
         min-height: 14px;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
       }
       .rs-status-ok { color: var(--rs-ok); }
       .rs-status-error { color: var(--rs-error); }
@@ -587,6 +612,8 @@
         gap: 8px;
       }
       .rs-btn {
+        display: flex;
+        align-items: center;
         padding: 5px 10px;
         font-size: 12px;
         font-family: inherit;
@@ -661,9 +688,7 @@
         padding: 8px 0;
       }
       .rs-close-btn {
-        position: absolute;
-        top: 6px;
-        right: 8px;
+        margin-left: auto;
         background: none;
         border: none;
         cursor: pointer;
@@ -806,6 +831,10 @@
         e.stopPropagation();
         togglePopup(false);
         return;
+      }
+      if (e.target.closest('.rs-back-btn')) {
+        e.stopPropagation();
+        setSettingsOpen(false);
       }
       if (e.target.closest('.rs-settings-btn')) {
         e.stopPropagation();

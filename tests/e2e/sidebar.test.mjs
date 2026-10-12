@@ -477,6 +477,102 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.equal(stored.hotkey, 'Alt+Shift+R', 'reset should persist the default');
   });
 
+  test('header shows the back button and "Settings" title, gear hidden, and back returns', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+
+    // List view: main icon+title, no back button, gear present.
+    const list = await b.evaluate(`(() => {
+      const q = (s) => document.querySelector(s);
+      return {
+        title: q('.rs-header').textContent,
+        back: getComputedStyle(q('.rs-back-btn')).display,
+        gear: getComputedStyle(q('.rs-settings-btn')).display,
+      };
+    })()`);
+    assert.equal(list.title, '📋 Recent Subreddits', 'list view should show the main icon+title');
+    assert.equal(list.back, 'none', 'back button must be hidden in the list view');
+    assert.notEqual(list.gear, 'none', 'gear must be visible in the list view');
+
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel open'
+    );
+
+    // Settings view: title swapped, back visible, gear hidden (redundant).
+    const settings = await b.evaluate(`(() => {
+      const q = (s) => document.querySelector(s);
+      return {
+        title: q('.rs-header').textContent,
+        back: getComputedStyle(q('.rs-back-btn')).display,
+        gear: getComputedStyle(q('.rs-settings-btn')).display,
+      };
+    })()`);
+    assert.equal(settings.title, '⚙ Settings', 'settings view should show its own icon+title');
+    assert.notEqual(settings.back, 'none', 'back button must be visible in settings');
+    assert.equal(settings.gear, 'none', 'gear is redundant next to the Settings title and must be hidden');
+
+    // The back button is the way out, and it restores the list view.
+    await b.evaluate(`document.querySelector('.rs-back-btn').click()`);
+    await b.waitUntil(
+      `!document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'back button to close the settings panel'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelector('.rs-header').textContent`),
+      '📋 Recent Subreddits',
+      'back must restore the main title'
+    );
+    assert.equal(await b.evaluate(isVisible), true, 'back must not close the popup itself');
+  });
+
+  test('close button sits at the end of the header row, aligned with the popup edge', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+
+    const geo = await b.evaluate(`(() => {
+      const popup = document.querySelector('${POPUP}');
+      const close = document.querySelector('.rs-close-btn');
+      const title = document.querySelector('.rs-header');
+      const gear = document.querySelector('.rs-settings-btn');
+      const row = document.querySelector('.rs-header-row');
+      const p = popup.getBoundingClientRect();
+      const c = close.getBoundingClientRect();
+      const t = title.getBoundingClientRect();
+      const g = gear.getBoundingClientRect();
+      return {
+        closeRight: c.right,
+        contentRight: p.right - 14,
+        closeCenterY: c.top + c.height / 2,
+        titleCenterY: t.top + t.height / 2,
+        closeLeft: c.left,
+        gearRight: g.right,
+        // The properties the change actually made: in-flow, and last on the row.
+        position: getComputedStyle(close).position,
+        isLastChild: row.lastElementChild === close,
+        childOrder: Array.from(row.children).map((el) => el.className),
+      };
+    })()`);
+
+    // The core of the change: the close button is a flex item on the header row,
+    // not an absolutely-positioned glyph floating over the popup corner.
+    assert.equal(geo.position, 'static', 'close button must be in the header row flow, not absolute');
+    assert.equal(geo.isLastChild, true, `close must be the last control on the row, got ${geo.childOrder}`);
+
+    // It is pushed to the row's right end, so it clears the gear.
+    assert.ok(geo.closeLeft > geo.gearRight, `close must sit after the gear, got ${JSON.stringify(geo)}`);
+
+    // Vertically centred with the title — this is what the old absolute
+    // `top: 6px` positioning failed (it rode ~8px high).
+    assert.ok(
+      Math.abs(geo.closeCenterY - geo.titleCenterY) <= 3,
+      `close button should be vertically centred with the title, got ${JSON.stringify(geo)}`
+    );
+  });
+
   test('Escape closes the settings modal before the popup', async () => {
     await open();
     await b.evaluate(HOVER('#logo'));
