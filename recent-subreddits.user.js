@@ -1212,6 +1212,25 @@
     for (const t of wanted) mountInlineInstance(t);
   }
 
+  // src/triggers.js
+  function resolveTrigger(target) {
+    if (!target || typeof target.closest !== "function") return null;
+    for (const t of hookTargets()) {
+      let el;
+      try {
+        el = target.closest(t.selector);
+      } catch {
+        continue;
+      }
+      if (el) return { el, events: t.events };
+    }
+    const builtin = target.closest(TRIGGER_SELECTOR);
+    if (builtin) return { el: builtin, events: "both" };
+    return null;
+  }
+  var wantsHover = (events) => events === "hover" || events === "both";
+  var wantsClick = (events) => events === "click" || events === "both";
+
   // src/app.js
   var HEADER_TITLE = { main: "\u{1F4CB} Recent Subreddits", settings: "\u2699 Settings" };
   var sidebarEl = null;
@@ -1301,23 +1320,6 @@
   function isPopupVisible() {
     return !!popupEl && popupEl.classList.contains("visible");
   }
-  function resolveTrigger(target) {
-    if (!target || typeof target.closest !== "function") return null;
-    for (const t of hookTargets()) {
-      let el;
-      try {
-        el = target.closest(t.selector);
-      } catch {
-        continue;
-      }
-      if (el) return { el, events: t.events };
-    }
-    const builtin = target.closest(TRIGGER_SELECTOR);
-    if (builtin) return { el: builtin, events: "both" };
-    return null;
-  }
-  var wantsHover = (events) => events === "hover" || events === "both";
-  var wantsClick = (events) => events === "click" || events === "both";
   function ensureMounted() {
     if (!sidebarEl) return;
     if (!document.body.contains(sidebarEl)) {

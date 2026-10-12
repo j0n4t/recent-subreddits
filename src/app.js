@@ -3,16 +3,16 @@ import { parseHotkey, hotkeyMatches } from './hotkey.js';
 import {
   loadData,
   loadSettings,
-  hookTargets,
 } from './storage.js';
 
-import { TRIGGER_SELECTOR, checkTriggers } from './diagnostics.js';
+import { checkTriggers } from './diagnostics.js';
 import { injectStyles } from './styles.js';
 import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore } from './visits.js';
 import { positionPopup, positionPopupCentered } from './position.js';
 import { renderContent as renderContentInto } from './content.js';
 import { renderSettingsPanel } from './settings-panel.js';
 import { initInline, refreshInline, applyTargets } from './inline.js';
+import { resolveTrigger, wantsHover, wantsClick } from './triggers.js';
 
 // ---------- Build sidebar element ----------
 // Header label per view: icon + title, swapped when the settings panel opens.
@@ -152,35 +152,6 @@ function togglePopup(show, trigger) {
 function isPopupVisible() {
   return !!popupEl && popupEl.classList.contains('visible');
 }
-
-// ---------- Mount popup ----------
-/**
- * Resolve an event target to `{el, events}` if it is a popup trigger, else null.
- * A user hook wins over the built-in selectors so its own event choice applies.
- */
-function resolveTrigger(target) {
-  if (!target || typeof target.closest !== 'function') return null;
-
-  for (const t of hookTargets()) {
-    let el;
-    try {
-      el = target.closest(t.selector);
-    } catch {
-      // A selector the user typed by hand may be invalid — ignore it.
-      continue;
-    }
-    if (el) return { el, events: t.events };
-  }
-
-  const builtin = target.closest(TRIGGER_SELECTOR);
-  // The stock logo triggers keep the original behaviour: hover and click.
-  if (builtin) return { el: builtin, events: 'both' };
-
-  return null;
-}
-
-const wantsHover = (events) => events === 'hover' || events === 'both';
-const wantsClick = (events) => events === 'click' || events === 'both';
 
 // ---------- Keep our own nodes alive ----------
 // The wrapper lives on document.body, but the host can replace body content
