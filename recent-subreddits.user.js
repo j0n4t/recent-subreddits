@@ -317,7 +317,8 @@
   function updateIconInDom(name, icon) {
     if (!sidebarEl || !icon) return;
     const encoded = encodeURIComponent(name);
-    document.querySelectorAll("img.rs-icon").forEach((img) => {
+    const icons = document.querySelectorAll("img.rs-icon");
+    icons.forEach((img) => {
       if (img.dataset.name === encoded) img.src = icon;
     });
   }
@@ -623,13 +624,16 @@
   }
   var inlineInstances = /* @__PURE__ */ new Map();
   var INLINE_MODES = ["replace", "prepend", "append"];
-  function buildInlineInstance(target) {
+  function buildInlineInstance() {
     const inst = buildPopupShell();
     inst.classList.remove("recent-subreddits-popup");
     inst.classList.add("rs-inline", "rs-instance");
     inst.removeAttribute("id");
     inst.classList.remove("visible");
-    const close = inst.querySelector(".rs-close-btn");
+    const close = (
+      /** @type {HTMLElement|null} */
+      inst.querySelector(".rs-close-btn")
+    );
     if (close) close.title = "Remove this binding";
     return inst;
   }
@@ -667,7 +671,7 @@
       rec = null;
     }
     if (!rec) {
-      const inst = buildInlineInstance(target);
+      const inst = buildInlineInstance();
       const host = document.createElement("div");
       host.className = "rs-inline-host" + (mode === "replace" ? " rs-inline-host-replace" : "");
       host.dataset.rsSelector = selector;
@@ -1347,7 +1351,11 @@
       }
     });
     document.addEventListener("keydown", (e) => {
-      if (e.target && e.target.classList && e.target.classList.contains("rs-hotkey-input")) return;
+      const target = (
+        /** @type {HTMLElement} */
+        e.target
+      );
+      if (target && target.classList && target.classList.contains("rs-hotkey-input")) return;
       if (e.key === "Escape") {
         if (isSettingsOpen()) {
           setSettingsOpen(false);

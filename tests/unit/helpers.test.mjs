@@ -24,7 +24,6 @@ function extractFunction(name) {
 
   let depth = 0;
   let i = source.indexOf('{', start);
-  const bodyStart = i;
   for (; i < source.length; i++) {
     if (source[i] === '{') depth++;
     else if (source[i] === '}') {
@@ -33,7 +32,6 @@ function extractFunction(name) {
     }
   }
   const text = source.slice(start, i + 1);
-  // eslint-disable-next-line no-new-func
   return new Function(`return (${text})`)();
 }
 
@@ -85,7 +83,6 @@ describe('getSubredditFromUrl', () => {
       source.indexOf('function getSubredditFromUrl('),
       source.indexOf('function trackVisit(')
     );
-    // eslint-disable-next-line no-new-func
     return new Function('window', `${src}\nreturn getSubredditFromUrl();`)({
       location: { pathname: path },
     });

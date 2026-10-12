@@ -202,7 +202,9 @@ function updateIconInDom(name, icon) {
   if (!sidebarEl || !icon) return;
   const encoded = encodeURIComponent(name);
   // Icons live in every mounted instance: the popup and any inline block.
-  document.querySelectorAll('img.rs-icon').forEach((img) => {
+  /** @type {NodeListOf<HTMLImageElement>} */
+  const icons = document.querySelectorAll('img.rs-icon');
+  icons.forEach((img) => {
     if (img.dataset.name === encoded) img.src = icon;
   });
 }
@@ -631,7 +633,7 @@ const inlineInstances = new Map(); // selector -> { el, host, mode }
 
 const INLINE_MODES = ['replace', 'prepend', 'append'];
 
-function buildInlineInstance(target) {
+function buildInlineInstance() {
   const inst = buildPopupShell();
 
   // Inline blocks are always visible and are not a popup: drop the popup's
@@ -642,7 +644,7 @@ function buildInlineInstance(target) {
   inst.removeAttribute('id');
   inst.classList.remove('visible');
   // The close button's job here is to drop the binding, not to hide a popup.
-  const close = inst.querySelector('.rs-close-btn');
+  const close = /** @type {HTMLElement|null} */ (inst.querySelector('.rs-close-btn'));
   if (close) close.title = 'Remove this binding';
 
   // The inline block has no anchor, so a hotkey-positioned popup is irrelevant.
@@ -697,7 +699,7 @@ function mountInlineInstance(target) {
   }
 
   if (!rec) {
-    const inst = buildInlineInstance(target);
+    const inst = buildInlineInstance();
     const host = document.createElement('div');
     host.className = 'rs-inline-host' + (mode === 'replace' ? ' rs-inline-host-replace' : '');
     host.dataset.rsSelector = selector;
@@ -1492,7 +1494,8 @@ function mountSidebar() {
   // ---- Keyboard ----
   document.addEventListener('keydown', (e) => {
     // The settings field handles its own keys and consumes them.
-    if (e.target && e.target.classList && e.target.classList.contains('rs-hotkey-input')) return;
+    const target = /** @type {HTMLElement} */ (e.target);
+    if (target && target.classList && target.classList.contains('rs-hotkey-input')) return;
 
     if (e.key === 'Escape') {
       // Escape closes the settings modal first, then the popup.

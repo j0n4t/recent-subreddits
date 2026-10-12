@@ -5,8 +5,21 @@
   "description": "Userscript: recently visited subreddits in a popup anchored to the Reddit logo",
   "type": "module",
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "pretest": "npm run build",
     "test": "node --test \"tests/unit/*.test.mjs\"",
     "test:e2e": "node --test \"tests/e2e/*.test.mjs\"",
-    "test:all": "npm test && npm run test:e2e"
+    "test:all": "npm test && npm run test:e2e",
+    "lint": "eslint .",
+    "typecheck": "tsc",
+    "check": "npm run lint && npm run typecheck && npm run test:all"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "typescript": "^7.0.2"
   }
 }
