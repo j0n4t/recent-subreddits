@@ -104,7 +104,7 @@
     return parts.join(" > ");
   }
 
-  // src/app.js
+  // src/storage.js
   var STORAGE_KEY = "recentSubreddits";
   var MAX_RECENT = 15;
   function loadData() {
@@ -163,6 +163,14 @@
     GM_setValue(SETTINGS_KEY, JSON.stringify(settings));
     hookTargetsCache = null;
   }
+  function hookTargets() {
+    if (!hookTargetsCache) {
+      hookTargetsCache = loadSettings().targets.filter((t) => t.mode === "hook");
+    }
+    return hookTargetsCache;
+  }
+
+  // src/app.js
   var PICKER_STYLE_ID = "rs-picker-styles";
   var pickerActive = false;
   var pickerBox = null;
@@ -1247,12 +1255,6 @@
     "#reddit-logo",
     "#navbar-menu-button"
   ].join(", ");
-  function hookTargets() {
-    if (!hookTargetsCache) {
-      hookTargetsCache = loadSettings().targets.filter((t) => t.mode === "hook");
-    }
-    return hookTargetsCache;
-  }
   function resolveTrigger(target) {
     if (!target || typeof target.closest !== "function") return null;
     for (const t of hookTargets()) {
