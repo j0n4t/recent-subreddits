@@ -63,6 +63,47 @@
     return `${days}d ago`;
   }
 
+  // src/selector.js
+  function cssEscape(value) {
+    const s = String(value);
+    if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(s);
+    return s.replace(/[^a-zA-Z0-9_-]/g, (c) => "\\" + c);
+  }
+  function isUnique(selector) {
+    try {
+      return document.querySelectorAll(selector).length === 1;
+    } catch {
+      return false;
+    }
+  }
+  function buildSelector(el) {
+    if (!el || el.nodeType !== 1) return "";
+    if (el.id && isUnique("#" + cssEscape(el.id))) {
+      const id = "#" + cssEscape(el.id);
+      if (id.length < 80) return id;
+    }
+    const testId = el.getAttribute("data-testid");
+    if (testId) {
+      const sel = `[data-testid="${cssEscape(testId)}"]`;
+      if (isUnique(sel)) return sel;
+    }
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === 1 && node !== document.documentElement) {
+      let part = node.tagName.toLowerCase();
+      const parent = node.parentElement;
+      if (parent) {
+        const sameTag = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
+        if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      const candidate = parts.join(" > ");
+      if (isUnique(candidate)) return candidate;
+      node = parent;
+    }
+    return parts.join(" > ");
+  }
+
   // src/app.js
   var STORAGE_KEY = "recentSubreddits";
   var MAX_RECENT = 15;
@@ -121,45 +162,6 @@
   function saveSettings(settings) {
     GM_setValue(SETTINGS_KEY, JSON.stringify(settings));
     hookTargetsCache = null;
-  }
-  function cssEscape(value) {
-    const s = String(value);
-    if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(s);
-    return s.replace(/[^a-zA-Z0-9_-]/g, (c) => "\\" + c);
-  }
-  function isUnique(selector) {
-    try {
-      return document.querySelectorAll(selector).length === 1;
-    } catch {
-      return false;
-    }
-  }
-  function buildSelector(el) {
-    if (!el || el.nodeType !== 1) return "";
-    if (el.id && isUnique("#" + cssEscape(el.id))) {
-      const id = "#" + cssEscape(el.id);
-      if (id.length < 80) return id;
-    }
-    const testId = el.getAttribute("data-testid");
-    if (testId) {
-      const sel = `[data-testid="${cssEscape(testId)}"]`;
-      if (isUnique(sel)) return sel;
-    }
-    const parts = [];
-    let node = el;
-    while (node && node.nodeType === 1 && node !== document.documentElement) {
-      let part = node.tagName.toLowerCase();
-      const parent = node.parentElement;
-      if (parent) {
-        const sameTag = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
-        if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
-      }
-      parts.unshift(part);
-      const candidate = parts.join(" > ");
-      if (isUnique(candidate)) return candidate;
-      node = parent;
-    }
-    return parts.join(" > ");
   }
   var PICKER_STYLE_ID = "rs-picker-styles";
   var pickerActive = false;
