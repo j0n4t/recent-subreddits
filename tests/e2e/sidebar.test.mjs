@@ -1138,6 +1138,81 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
   });
 
+  test('inline replace: hides content that re-declares visibility:visible', async () => {
+    // Reddit's login rail contains a descendant with an explicit
+    // visibility:visible, which OVERRIDES an ancestor's visibility:hidden. So
+    // hiding the target alone left the login prompt painted over the block.
+    // This is the fixture's reproduction of that; it fails without the
+    // .rs-replacing !important rule.
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#override-target', mode: 'replace' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    const state = await b.evaluate(`(() => {
+      const inner = document.querySelector('#override-inner');
+      const block = document.querySelector('.rs-inline');
+      const ib = block.getBoundingClientRect();
+      // Probe where the replaced content would be drawn.
+      const hit = document.elementFromPoint(
+        Math.round(ib.left + ib.width / 2),
+        Math.round(ib.top + ib.height / 2)
+      );
+      return {
+        targetMarked: document.querySelector('#override-target').classList.contains('rs-replacing'),
+        innerVisibility: getComputedStyle(inner).visibility,
+        blockVisibility: getComputedStyle(block).visibility,
+        blockBackground: getComputedStyle(block).backgroundColor,
+        // The decisive test: what is painted at the block's location?
+        hitIsBlock: !!hit && (block === hit || block.contains(hit)),
+        hitText: hit ? (hit.innerText || '').slice(0, 40) : null,
+      };
+    })()`);
+
+    assert.equal(state.targetMarked, true, 'the target must carry the replace marker');
+    assert.equal(
+      state.innerVisibility,
+      'hidden',
+      'a descendant that re-declares visibility:visible must still be hidden'
+    );
+    assert.equal(state.blockVisibility, 'visible', 'our own block must stay visible');
+    assert.equal(
+      state.hitIsBlock,
+      true,
+      `the block must be what is painted there, got: ${state.hitText}`
+    );
+    assert.notEqual(
+      state.blockBackground,
+      'rgba(0, 0, 0, 0)',
+      'the block must have an opaque background, or hidden content shows through'
+    );
+  });
+
+  test('inline replace: teardown clears the marker and restores the content', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#override-target', mode: 'replace' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    await b.evaluate(`document.querySelector('.rs-inline .rs-close-btn').click()`);
+    await b.waitUntil(`!document.querySelector('.rs-inline-host')`, 'the block to be removed');
+
+    const after = await b.evaluate(`(() => {
+      const target = document.querySelector('#override-target');
+      const inner = document.querySelector('#override-inner');
+      return {
+        marked: target.classList.contains('rs-replacing'),
+        innerVisibility: getComputedStyle(inner).visibility,
+      };
+    })()`);
+    assert.equal(after.marked, false, 'the marker must be removed on teardown');
+    assert.equal(after.innerVisibility, 'visible', 'the original content must come back');
+  });
+
   test('inline prepend: inserts the UI as the first child, element untouched', async () => {
     await b.goto(
       fixtureUrl(DEFAULT_SEED) +

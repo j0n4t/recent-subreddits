@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>Reddit mock</title>
+<style>
+  /* Stands in for the Tailwind utility reddit ships on its login prompt. An
+     explicit visibility:visible on a descendant overrides an ancestor's
+     visibility:hidden — that is the behaviour under test. */
+  .visible { visibility: visible; }
+</style>
 </head>
 <body>
   <!--
@@ -28,6 +34,15 @@
     <div data-testid="testid-only">testid only</div>
     <!-- Already positioned: a replace must leave its own value alone. -->
     <div id="positioned-target" style="position: relative">already positioned</div>
+    <!-- Reproduces reddit's login rail: a descendant that re-declares
+         visibility:visible, which overrides an ancestor's visibility:hidden.
+         Without the .rs-replacing !important rule this content stays painted
+         over the replacement block. -->
+    <div id="override-target">
+      <div class="visible" id="override-inner">
+        <span>LOGIN PROMPT TEXT</span>
+      </div>
+    </div>
     <div class="hashed-x1y2z3">
       <span class="leaf">deep child</span>
     </div>

@@ -333,7 +333,10 @@ export function injectStyles() {
       width: auto;
       max-height: none;
       overflow: visible;
-      background: transparent;
+      /* Opaque, not transparent: the block is nested inside the element it
+         replaces, and anything of that element still painted underneath would
+         otherwise show through the list. */
+      background: var(--rs-bg);
       border: none;
       border-radius: 0;
       padding: 6px;
@@ -369,6 +372,25 @@ export function injectStyles() {
       visibility: visible;
       top: 0;
       left: 0;
+    }
+    /* A replace target is marked with this class. visibility:hidden alone is
+       not enough: it inherits, but an explicit visibility:visible on a
+       DESCENDANT overrides it, and Reddit ships exactly that (a Tailwind
+       "visible" class) on its login prompt — so the prompt stayed painted over
+       the replacement block. Force the whole subtree hidden, then re-show our
+       own block, which lives inside that subtree. */
+    /* .rs-replacing * is load-bearing: !important on the ELEMENT alone does not
+       beat the descendant's own visibility:visible, but a rule that matches the
+       descendant does. Verified against the fixture and live reddit. */
+    .rs-replacing,
+    .rs-replacing * {
+      visibility: hidden !important;
+    }
+    /* Both rules are !important, so specificity decides: this selector is more
+       specific than the hide rule above, which is what re-shows our block. */
+    .rs-replacing > .rs-inline-host,
+    .rs-replacing > .rs-inline-host * {
+      visibility: visible !important;
     }
 
     /* ---- Resize handle for inline blocks ---- */

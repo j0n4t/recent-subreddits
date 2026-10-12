@@ -123,9 +123,14 @@ function mountInlineInstance(target) {
         el.style.position = 'relative';
         promoted = true;
       }
+      // Hide the element's whole subtree via a class on the element itself.
+      // visibility:hidden inherits, but an explicit visibility:visible on a
+      // descendant overrides it — and Reddit ships such a class (Tailwind
+      // "visible") on its login prompt, so the prompt stayed painted over the
+      // block. One class + an !important rule beats walking every child.
+      el.classList.add('rs-replacing');
       // Nest inside the element and overlap it — avoids leaving a gap
       // in the document flow where the hidden element used to be.
-      el.style.visibility = 'hidden';
       el.appendChild(host);
     } else if (mode === 'prepend') {
       el.insertBefore(host, el.firstChild);
@@ -247,8 +252,8 @@ export function applyTargets() {
   for (const [selector, rec] of Array.from(inlineInstances.entries())) {
     const stillWanted = wanted.some((t) => t.selector === selector);
     if (!stillWanted) {
-      // Un-hide the element we replaced, or it stays invisible forever.
-      if (rec.el && rec.el.style.visibility === 'hidden') rec.el.style.visibility = '';
+      // Drop the marker that hid the element's subtree.
+      if (rec.el) rec.el.classList.remove('rs-replacing');
       // Drop a containing block we established, but only ours — an element the
       // page positioned itself must keep its value.
       if (rec.promoted && rec.el) rec.el.style.position = '';

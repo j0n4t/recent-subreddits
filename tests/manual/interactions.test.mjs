@@ -353,6 +353,90 @@ async function runLive() {
     'teardown restores the page',
     'Is the page back to normal — content visible, nothing left behind?'
   );
+
+  // ---- the logged-out login rail ----
+  header('STEP 7 — replace the useless login left sidebar');
+  console.log(`
+  Binding "replace" to #left-sidebar-container — the logged-out rail that only
+  advertises signing in. Two things must be true: the rail's login prompt must
+  be GONE, and the subreddit list must be visible in its place. Reddit ships a
+  descendant with an explicit visibility:visible there, which is why hiding the
+  element alone used to leave the prompt painted over the block.
+`);
+  await ask('  Press Enter to bind replace to the login rail. ');
+
+  const railBefore = await b.evaluate(`(() => {
+    const el = document.querySelector('#left-sidebar-container');
+    if (!el) return { found: false };
+    const r = el.getBoundingClientRect();
+    return {
+      found: true,
+      rect: { t: Math.round(r.top), l: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) },
+      hasLoginPrompt: (el.innerText || '').includes('Continuar com'),
+    };
+  })()`);
+  console.log(`  rail before: ${JSON.stringify(railBefore)}`);
+
+  await b.evaluate(`
+    (() => {
+      window.__store.recentSubredditsSettings = JSON.stringify({
+        hotkey: 'Alt+Shift+R',
+        targets: [{ selector: '#left-sidebar-container', mode: 'replace' }],
+      });
+      document.querySelector('.recent-subreddits-container')?.remove();
+      document.querySelectorAll('.rs-inline-host').forEach((n) => n.remove());
+      return 'seeded';
+    })()
+  `);
+  await injectIntoPage();
+  await delayMs(1500);
+
+  const railAfter = await b.evaluate(`(() => {
+    const rail = document.querySelector('#left-sidebar-container');
+    const inst = document.querySelector('.rs-inline');
+    if (!inst || !rail) return { mounted: false, rail: !!rail, block: !!inst };
+    const ib = inst.getBoundingClientRect();
+    const rb = rail.getBoundingClientRect();
+    // Is any login prompt still PAINTED? Check every descendant's computed
+    // visibility, not just the element's — that is the bug being guarded.
+    let promptPainted = 0;
+    for (const el of rail.querySelectorAll('*')) {
+      if (inst.contains(el)) continue;
+      if (getComputedStyle(el).visibility !== 'visible') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 10) continue;
+      if ((el.innerText || '').includes('Continuar com')) promptPainted++;
+    }
+    const y = Math.round(Math.max(ib.top, 0) + Math.min(ib.height, innerHeight - Math.max(ib.top, 0)) / 2);
+    const hit = document.elementFromPoint(Math.round(ib.left + ib.width / 2), y);
+    return {
+      mounted: true,
+      railMarked: rail.classList.contains('rs-replacing'),
+      block: { t: Math.round(ib.top), l: Math.round(ib.left), w: Math.round(ib.width) },
+      rail: { t: Math.round(rb.top), l: Math.round(rb.left), w: Math.round(rb.width) },
+      dx: Math.round(ib.left - rb.left),
+      dy: Math.round(ib.top - rb.top),
+      promptElementsStillPainted: promptPainted,
+      blockOnTop: !!hit && (inst === hit || inst.contains(hit)),
+      blockItems: inst.querySelectorAll('.rs-item').length,
+      errors: window.__errors,
+    };
+  })()`);
+  console.log(`  ${JSON.stringify(railAfter, null, 2)}`);
+
+  await check(
+    'login rail replaced, prompt gone',
+    `The sidebar should show the subreddit list with NO login buttons ` +
+    `(prompt elements still painted: ${railAfter.promptElementsStillPainted}, ` +
+    `dx=${railAfter.dx}, dy=${railAfter.dy}, on top=${railAfter.blockOnTop}). ` +
+    `Look at the left sidebar: is the login prompt gone and the list readable?`,
+    // Machine-checkable: block over the rail, on top, and no prompt painted.
+    railAfter.mounted === true &&
+      railAfter.dx === 0 &&
+      railAfter.dy === 0 &&
+      railAfter.blockOnTop === true &&
+      railAfter.promptElementsStillPainted === 0
+  );
 }
 
 // ---------------------------------------------------------------------------
