@@ -11,13 +11,23 @@
     a fresh, isolated page without touching disk.
 
       ?seed=<base64 utf8 JSON>   initial GM store value for "recentSubreddits"
+      ?settings=<base64 JSON>    initial GM store value for "recentSubredditsSettings"
       ?iconDelay=<ms>            latency of the stubbed icon fetch
   -->
   <header id="site-header">
     <a href="/" id="logo" data-testid="top-nav-logo"><span id="logo-glyph">R</span></a>
     <button id="menu-btn" aria-label="Open menu">menu</button>
   </header>
-  <main id="content">mock page body</main>
+  <main id="content">
+    mock page body
+    <!-- A plain element that is NOT a built-in trigger: the picker's target. -->
+    <div id="pick-target" data-testid="pick-me">pick me</div>
+    <!-- No id: the picker must fall back to the data-testid. -->
+    <div data-testid="testid-only">testid only</div>
+    <div class="hashed-x1y2z3">
+      <span class="leaf">deep child</span>
+    </div>
+  </main>
   <script>
   (() => {
     const params = new URLSearchParams(location.search);
@@ -29,6 +39,11 @@
       const bin = atob(seed);
       const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
       store.recentSubreddits = new TextDecoder().decode(bytes);
+    }
+    // Settings are seeded as plain JSON (they are small and rarely non-ASCII).
+    const settingsParam = params.get('settings');
+    if (settingsParam) {
+      store.recentSubredditsSettings = decodeURIComponent(escape(atob(settingsParam)));
     }
 
     window.__store = store;

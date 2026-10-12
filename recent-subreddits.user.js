@@ -43,26 +43,255 @@
   // The escape hatch: a shortcut that opens the popup without depending on any
   // Reddit selector. If the header markup changes and the logo stops matching,
   // this still works, so a markup change degrades the feature instead of killing it.
-  const DEFAULT_SETTINGS = { hotkey: 'Alt+Shift+R' };
+  const DEFAULT_SETTINGS = { hotkey: 'Alt+Shift+R', targets: [] };
+
+  // Which page elements the user hooked, and how each one behaves.
+  //   hook    — hovering/clicking it opens the popup
+  //   replace / prepend / append — render the list inline at that spot
+  // `events` only applies to `hook`: 'hover' | 'click' | 'both'.
+  const TARGET_MODES = ['hook', 'replace', 'prepend', 'append'];
+  const TARGET_EVENTS = ['hover', 'click', 'both'];
+
+  // Hook targets are consulted on every mouseover, so they are cached and the
+  // cache is dropped whenever settings are written.
+  let hookTargetsCache = null;
+
+  /** Drop anything malformed so a hand-edited store cannot break the script. */
+  function normalizeTargets(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const t of raw) {
+      if (!t || typeof t.selector !== 'string' || !t.selector.trim()) continue;
+      out.push({
+        selector: t.selector.trim(),
+        mode: TARGET_MODES.includes(t.mode) ? t.mode : 'hook',
+        events: TARGET_EVENTS.includes(t.events) ? t.events : 'both',
+      });
+    }
+    return out;
+  }
 
   function loadSettings() {
     try {
       const raw = GM_getValue(SETTINGS_KEY, null);
-      if (!raw) return { ...DEFAULT_SETTINGS };
+      if (!raw) return { hotkey: DEFAULT_SETTINGS.hotkey, targets: [] };
       const parsed = JSON.parse(raw);
       return {
         hotkey:
           typeof parsed.hotkey === 'string' && parsed.hotkey.trim()
             ? parsed.hotkey.trim()
             : DEFAULT_SETTINGS.hotkey,
+        targets: normalizeTargets(parsed.targets),
       };
     } catch {
-      return { ...DEFAULT_SETTINGS };
+      return { hotkey: DEFAULT_SETTINGS.hotkey, targets: [] };
     }
   }
 
   function saveSettings(settings) {
     GM_setValue(SETTINGS_KEY, JSON.stringify(settings));
+    // Invalidate the hook lookup — it is read on every mouseover.
+    hookTargetsCache = null;
+  }
+
+  // ---------- Selector builder ----------
+  /**
+   * Turn a picked element into a selector that survives a re-render as well as it
+   * can. Priority: a stable id, then a data-testid, then an nth-of-type path.
+   * Classes are deliberately NOT used alone — Reddit's build hashes them and they
+   * change between deploys, which is the whole reason this feature exists.
+   */
+  function cssEscape(value) {
+    const s = String(value);
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(s);
+    return s.replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c);
+  }
+
+  function isUnique(selector) {
+    try {
+      return document.querySelectorAll(selector).length === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  /** A selector for `el`, preferring whatever is least likely to break. */
+  function buildSelector(el) {
+    if (!el || el.nodeType !== 1) return '';
+
+    // 1. A usable id (auto-generated ids like ":r1:" are not stable).
+    if (el.id && isUnique('#' + cssEscape(el.id))) {
+      const id = '#' + cssEscape(el.id);
+      if (id.length < 80) return id;
+    }
+
+    // 2. A test id — Reddit keeps these stable across builds.
+    const testId = el.getAttribute('data-testid');
+    if (testId) {
+      const sel = `[data-testid="${cssEscape(testId)}"]`;
+      if (isUnique(sel)) return sel;
+    }
+
+    // 3. An nth-of-type path, shortened by the nearest unique ancestor.
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === 1 && node !== document.documentElement) {
+      let part = node.tagName.toLowerCase();
+      const parent = node.parentElement;
+      if (parent) {
+        const sameTag = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
+        if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+
+      const candidate = parts.join(' > ');
+      // Stop as soon as the tail is unique on its own — keeps it short.
+      if (isUnique(candidate)) return candidate;
+      node = parent;
+    }
+
+    return parts.join(' > ');
+  }
+
+  // ---------- Element picker ----------
+  // A live overlay: hovering the page outlines the element under the cursor, and
+  // clicking it hands its selector back. The overlay swallows the click so the
+  // host page never sees it (no navigation, no Reddit handler firing).
+  const PICKER_STYLE_ID = 'rs-picker-styles';
+
+  let pickerActive = false;
+  let pickerBox = null;
+  let pickerHovered = null;
+  let pickerOnPick = null;
+  let pickerOnEnd = null;
+
+  function pickerHintEl() {
+    return document.getElementById('rs-picker-hint');
+  }
+
+  function pickerCleanup() {
+    const hint = pickerHintEl();
+    if (hint) hint.remove();
+    document.removeEventListener('mousemove', pickerMove, true);
+    document.removeEventListener('click', pickerClick, true);
+    document.removeEventListener('keydown', pickerKey, true);
+    document.removeEventListener('scroll', pickerMove, true);
+    if (pickerBox) {
+      pickerBox.remove();
+      pickerBox = null;
+    }
+    pickerActive = false;
+    if (pickerOnEnd) {
+      const done = pickerOnEnd;
+      pickerOnEnd = null;
+      done();
+    }
+  }
+
+  function pickerMove(e) {
+    if (!pickerActive) return;
+    const el = e.target;
+    if (!el || el.nodeType !== 1) return;
+    // Never target our own chrome.
+    if (el.closest('#rs-popup, #rs-picker-hint')) return;
+
+    pickerHovered = el;
+    const rect = el.getBoundingClientRect();
+    const box = pickerBox;
+    box.style.display = 'block';
+    box.style.top = rect.top + 'px';
+    box.style.left = rect.left + 'px';
+    box.style.width = rect.width + 'px';
+    box.style.height = rect.height + 'px';
+
+    const hint = pickerHintEl();
+    if (hint) {
+      hint.textContent = `${buildSelector(el)}  —  click to use, Esc to cancel`;
+    }
+  }
+
+  function pickerClick(e) {
+    if (!pickerActive) return;
+    // Swallow the click: the host must not act on a pick.
+    e.preventDefault();
+    e.stopPropagation();
+    const el = pickerHovered;
+    const selector = el ? buildSelector(el) : '';
+    const onPick = pickerOnPick;
+    pickerCleanup();
+    if (selector && onPick) onPick(selector);
+  }
+
+  function pickerKey(e) {
+    if (!pickerActive) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      pickerCleanup();
+    }
+  }
+
+  /** Start picking. `onPick(selector)` fires on a click, `onEnd()` on any exit. */
+  function startPicker(onPick, onEnd) {
+    if (pickerActive) pickerCleanup();
+
+    if (!document.getElementById(PICKER_STYLE_ID)) {
+      const style = document.createElement('style');
+      style.id = PICKER_STYLE_ID;
+      style.textContent = `
+        #rs-picker-box {
+          position: fixed;
+          z-index: 2147483646;
+          pointer-events: none;
+          /* border-box: the 2px border must not inflate the box past the
+             element's rect, or the outline sits 4px off the element it marks. */
+          box-sizing: border-box;
+          border: 2px solid #d93a00;
+          background: rgba(217,58,0,0.12);
+          border-radius: 2px;
+          display: none;
+        }
+        #rs-picker-hint {
+          position: fixed;
+          z-index: 2147483647;
+          left: 50%;
+          bottom: 16px;
+          transform: translateX(-50%);
+          max-width: 90vw;
+          padding: 6px 12px;
+          font: 12px/1.4 monospace;
+          color: #fff;
+          background: rgba(0,0,0,0.85);
+          border-radius: 4px;
+          pointer-events: none;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    const box = document.createElement('div');
+    box.id = 'rs-picker-box';
+    document.body.appendChild(box);
+
+    const hint = document.createElement('div');
+    hint.id = 'rs-picker-hint';
+    hint.textContent = 'Hover an element and click it — Esc to cancel';
+    document.body.appendChild(hint);
+
+    pickerBox = box;
+    pickerHovered = null;
+    pickerOnPick = onPick;
+    pickerOnEnd = onEnd;
+    pickerActive = true;
+
+    // Capture phase so the host's own handlers never see the pick.
+    document.addEventListener('mousemove', pickerMove, true);
+    document.addEventListener('click', pickerClick, true);
+    document.addEventListener('keydown', pickerKey, true);
+    document.addEventListener('scroll', pickerMove, true);
   }
 
   // ---------- Hotkey parsing ----------
@@ -359,6 +588,52 @@
 
     const settings = loadSettings();
 
+    const modeOptions = (selected) =>
+      [
+        ['hook', 'Hook (open popup)'],
+        ['replace', 'Replace element'],
+        ['prepend', 'Prepend inside'],
+        ['append', 'Append inside'],
+      ]
+        .map(
+          ([value, label]) =>
+            `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`
+        )
+        .join('');
+
+    const eventOptions = (selected) =>
+      [
+        ['both', 'Hover + click'],
+        ['hover', 'Hover only'],
+        ['click', 'Click only'],
+      ]
+        .map(
+          ([value, label]) =>
+            `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`
+        )
+        .join('');
+
+    const targetRows = settings.targets.length
+      ? settings.targets
+          .map((t, i) => {
+            // Events only mean something for a hook target.
+            const eventsCell =
+              t.mode === 'hook'
+                ? `<select class="rs-select" data-role="events" data-index="${i}">${eventOptions(t.events)}</select>`
+                : `<span class="rs-muted">—</span>`;
+            return `
+              <li class="rs-target">
+                <code class="rs-target-sel" title="${escAttr(t.selector)}">${escAttr(t.selector)}</code>
+                <div class="rs-target-controls">
+                  <select class="rs-select" data-role="mode" data-index="${i}">${modeOptions(t.mode)}</select>
+                  ${eventsCell}
+                  <button class="rs-icon-btn" data-role="remove" data-index="${i}" title="Remove">✕</button>
+                </div>
+              </li>`;
+          })
+          .join('')
+      : '<li class="rs-empty">No page targets yet.</li>';
+
     panel.innerHTML = `
       <div class="rs-field">
         <label class="rs-label" for="rs-hotkey-input">Open popup hotkey</label>
@@ -368,6 +643,17 @@
         <div class="rs-hint">Click the field, then press the keys you want.
           Use at least one modifier (Ctrl / Alt / Shift / Meta).</div>
       </div>
+
+      <div class="rs-field">
+        <div class="rs-label-row">
+          <label class="rs-label">Page targets</label>
+          <button class="rs-btn rs-btn-small" id="rs-pick">Pick element…</button>
+        </div>
+        <div class="rs-hint">Pick an element on the page, then choose what it does.
+          A hook opens the popup; the others render the list inline there.</div>
+        <ul class="rs-targets" id="rs-targets">${targetRows}</ul>
+      </div>
+
       <div class="rs-status" id="rs-status"></div>
       <div class="rs-actions">
         <button class="rs-btn" id="rs-reset">Reset to default</button>
@@ -376,7 +662,15 @@
     `;
 
     const input = panel.querySelector('#rs-hotkey-input');
-    const status = panel.querySelector('#rs-status');
+
+    const say = (msg, kind) => {
+      // Re-query: renderSettings() rebuilds the panel, so a captured reference
+      // goes stale and the message would land on a detached node.
+      const el = panel.querySelector('#rs-status');
+      if (!el) return;
+      el.textContent = msg;
+      el.className = 'rs-status ' + (kind === 'error' ? 'rs-status-error' : 'rs-status-ok');
+    };
 
     // Capture the combination: the field is readonly so nothing is typed into it,
     // and the whole keydown is consumed so the host page never sees it.
@@ -391,16 +685,14 @@
 
       const combo = comboFromEvent(e);
       if (!combo) {
-        status.textContent = 'Press a key along with at least one modifier.';
-        status.className = 'rs-status rs-status-error';
+        say('Press a key along with at least one modifier.', 'error');
         return;
       }
 
       // Require a modifier: a bare letter would fire while the user is typing in
       // Reddit's own search box.
       if (!e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
-        status.textContent = 'Add a modifier (Ctrl / Alt / Shift / Meta).';
-        status.className = 'rs-status rs-status-error';
+        say('Add a modifier (Ctrl / Alt / Shift / Meta).', 'error');
         return;
       }
 
@@ -412,8 +704,72 @@
       // keydown (the field owns the keys), so leaving it focused would make the
       // hotkey appear not to work until the user clicked elsewhere.
       input.blur();
-      status.textContent = `Saved — press ${combo} to open the popup.`;
-      status.className = 'rs-status rs-status-ok';
+      say(`Saved — press ${combo} to open the popup.`);
+    });
+
+    // ---- Target list ----
+    const updateTarget = (index, patch) => {
+      const s = loadSettings();
+      if (!s.targets[index]) return;
+      Object.assign(s.targets[index], patch);
+      saveSettings(s);
+      renderSettings();
+      // Re-focus the control the user was using, so a mode change is not a dead end.
+      const sel = panel.querySelector(`[data-role="mode"][data-index="${index}"]`);
+      if (sel && 'mode' in patch) sel.focus();
+    };
+
+    panel.querySelector('#rs-pick').addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Close the popup so the whole page is pickable, then re-open settings after.
+      const wasOpen = isPopupVisible();
+      if (wasOpen) togglePopup(false);
+
+      startPicker(
+        (selector) => {
+          // onEnd() has already restored the UI by the time this runs.
+          const s = loadSettings();
+          if (s.targets.some((t) => t.selector === selector)) {
+            // Re-picking an element that is already configured is a no-op.
+            say('That element is already in the list.', 'error');
+            return;
+          }
+          s.targets.push({ selector, mode: 'hook', events: 'both' });
+          saveSettings(s);
+          renderSettings();
+          say(`Added ${selector}`);
+        },
+        () => {
+          // Cancelled (Esc) or finished: bring the UI back either way.
+          setSettingsOpen(true);
+          if (wasOpen) togglePopup(true);
+        }
+      );
+    });
+
+    panel.querySelector('#rs-targets').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-role="remove"]');
+      if (!btn) return;
+      e.stopPropagation();
+      const s = loadSettings();
+      s.targets.splice(Number(btn.dataset.index), 1);
+      saveSettings(s);
+      renderSettings();
+      const s2 = panel.querySelector('#rs-status');
+      s2.textContent = 'Target removed.';
+      s2.className = 'rs-status rs-status-ok';
+    });
+
+    panel.querySelector('#rs-targets').addEventListener('change', (e) => {
+      const sel = e.target.closest('[data-role="mode"], [data-role="events"]');
+      if (!sel) return;
+      e.stopPropagation();
+      const index = Number(sel.dataset.index);
+      const role = sel.dataset.role;
+      updateTarget(index, role === 'mode' ? { mode: sel.value } : { events: sel.value });
+      const s2 = panel.querySelector('#rs-status');
+      s2.textContent = 'Target updated.';
+      s2.className = 'rs-status rs-status-ok';
     });
 
     panel.querySelector('#rs-reset').addEventListener('click', (e) => {
@@ -444,6 +800,10 @@
 
   // Kept in a module-level variable so the hotkey can change without rebinding.
   let activeHotkey = null;
+
+  // The element the popup is currently anchored to, so it can be re-positioned
+  // without the caller having to pass the trigger again.
+  let lastTrigger = null;
 
   function formatTimeAgo(timestamp) {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -606,6 +966,82 @@
       }
       .rs-status-ok { color: var(--rs-ok); }
       .rs-status-error { color: var(--rs-error); }
+
+      /* ---- Page targets ---- */
+      .rs-label-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+      .rs-label-row .rs-label { margin-bottom: 0; }
+      .rs-btn-small {
+        padding: 3px 8px;
+        font-size: 11px;
+      }
+      .rs-targets {
+        list-style: none;
+        margin: 8px 0 0 0;
+        padding: 0;
+      }
+      .rs-target {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 6px 0;
+        border-top: 1px solid var(--rs-border);
+      }
+      .rs-target:first-child { border-top: none; }
+      .rs-target-sel {
+        font-family: monospace;
+        font-size: 11px;
+        color: var(--rs-text);
+        background: var(--rs-bg);
+        border: 1px solid var(--rs-border);
+        border-radius: 3px;
+        padding: 2px 5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .rs-target-controls {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .rs-select {
+        flex: 1;
+        min-width: 0;
+        padding: 3px 4px;
+        font-size: 11px;
+        font-family: inherit;
+        color: var(--rs-text);
+        background: var(--rs-bg);
+        border: 1px solid var(--rs-border);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .rs-select:focus {
+        outline: none;
+        border-color: var(--rs-accent);
+      }
+      .rs-muted {
+        flex: 1;
+        font-size: 11px;
+        color: var(--rs-text-muted);
+        text-align: center;
+      }
+      .rs-icon-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 4px;
+        font-size: 12px;
+        line-height: 1;
+        color: var(--rs-text-muted);
+      }
+      .rs-icon-btn:hover { color: var(--rs-error); }
       .rs-actions {
         display: flex;
         justify-content: space-between;
@@ -755,8 +1191,11 @@
   function togglePopup(show, trigger) {
     if (!popupEl) return;
     if (show) {
+      // Remember the anchor so re-opening after a pick lands in the same place
+      // instead of snapping to the centre.
+      if (trigger) lastTrigger = trigger;
       popupEl.classList.add('visible');
-      if (trigger) positionPopup(trigger);
+      if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(lastTrigger);
       else positionPopupCentered();
     } else {
       popupEl.classList.remove('visible');
@@ -784,6 +1223,45 @@
     '#reddit-logo',
     '#navbar-menu-button',
   ].join(', ');
+
+  /**
+   * Which hook targets the user configured, as `{selector, events}`. Cached
+   * because this runs on every mouseover; saveSettings() invalidates it.
+   */
+  function hookTargets() {
+    if (!hookTargetsCache) {
+      hookTargetsCache = loadSettings().targets.filter((t) => t.mode === 'hook');
+    }
+    return hookTargetsCache;
+  }
+
+  /**
+   * Resolve an event target to `{el, events}` if it is a popup trigger, else null.
+   * A user hook wins over the built-in selectors so its own event choice applies.
+   */
+  function resolveTrigger(target) {
+    if (!target || typeof target.closest !== 'function') return null;
+
+    for (const t of hookTargets()) {
+      let el;
+      try {
+        el = target.closest(t.selector);
+      } catch {
+        // A selector the user typed by hand may be invalid — ignore it.
+        continue;
+      }
+      if (el) return { el, events: t.events };
+    }
+
+    const builtin = target.closest(TRIGGER_SELECTOR);
+    // The stock logo triggers keep the original behaviour: hover and click.
+    if (builtin) return { el: builtin, events: 'both' };
+
+    return null;
+  }
+
+  const wantsHover = (events) => events === 'hover' || events === 'both';
+  const wantsClick = (events) => events === 'click' || events === 'both';
 
   // ---------- Keep our own nodes alive ----------
   // The wrapper lives on document.body, but the host can replace body content
@@ -859,24 +1337,26 @@
     // single listener covers every current and future trigger node, including
     // ones the host swaps in during SPA navigation.
     document.addEventListener('mouseover', (e) => {
-      const trigger = e.target.closest && e.target.closest(TRIGGER_SELECTOR);
-      if (!trigger) return;
+      const hit = resolveTrigger(e.target);
+      if (!hit || !wantsHover(hit.events)) return;
       // Ignore movement *within* the trigger (children re-fire mouseover).
-      if (e.relatedTarget && trigger.contains(e.relatedTarget)) return;
-      togglePopup(true, trigger);
+      if (e.relatedTarget && hit.el.contains(e.relatedTarget)) return;
+      togglePopup(true, hit.el);
     });
 
     document.addEventListener('click', (e) => {
-      const trigger = e.target.closest && e.target.closest(TRIGGER_SELECTOR);
-      if (trigger) {
+      const hit = resolveTrigger(e.target);
+      if (hit && wantsClick(hit.events)) {
         if (isPopupVisible()) {
           togglePopup(false);
         } else {
           e.preventDefault();
-          togglePopup(true, trigger);
+          togglePopup(true, hit.el);
         }
         return;
       }
+      // A click-only target's click must not fall through to "close the popup".
+      if (hit) return;
 
       // Click outside to close
       if (!isPopupVisible()) return;

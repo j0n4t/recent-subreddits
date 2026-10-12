@@ -25,6 +25,12 @@ function fixtureUrl(seed, iconDelay = 5) {
   return `${FIXTURE}?seed=${encodeURIComponent(b64)}&iconDelay=${iconDelay}`;
 }
 
+/** A `settings=` query value: base64 of the JSON, matching the fixture's parser. */
+function settingsParam(settings) {
+  const json = JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], ...settings });
+  return encodeURIComponent(Buffer.from(json, 'utf8').toString('base64'));
+}
+
 /**
  * Simulate a pointer entering an element, the way a real browser does: it fires
  * `mouseover` (bubbles) AND `mouseenter` (does not bubble) on the target.
@@ -594,6 +600,370 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     await b.evaluate(ESC);
     await b.waitUntil(`!${isVisible}`, 'second Escape closes the popup');
+  });
+
+  // ---- Live element picker ----
+
+  test('picker: hovering outlines an element and clicking adds it as a hook target', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel open'
+    );
+
+    // Start picking. The popup must get out of the way so the page is pickable.
+    await b.evaluate(`document.querySelector('#rs-pick').click()`);
+    await b.waitUntil(
+      `!!document.getElementById('rs-picker-hint')`,
+      'picker overlay to appear'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('visible')`),
+      false,
+      'the popup must close so the whole page can be picked'
+    );
+
+    // Hover the target: the outline box follows it and the hint names a selector.
+    await b.evaluate(`(() => {
+      const el = document.querySelector('#pick-target');
+      el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      return true;
+    })()`);
+    const hovered = await b.evaluate(`(() => {
+      const box = document.getElementById('rs-picker-box');
+      const hint = document.getElementById('rs-picker-hint');
+      const r = document.querySelector('#pick-target').getBoundingClientRect();
+      return {
+        display: getComputedStyle(box).display,
+        boxW: Math.round(box.getBoundingClientRect().width),
+        targetW: Math.round(r.width),
+        hint: hint.textContent,
+      };
+    })()`);
+    assert.equal(hovered.display, 'block', 'the outline box must be shown while hovering');
+    assert.ok(
+      Math.abs(hovered.boxW - hovered.targetW) <= 2,
+      `outline must match the hovered element, got ${JSON.stringify(hovered)}`
+    );
+    assert.match(hovered.hint, /pick-target/, `hint should name the selector, got: ${hovered.hint}`);
+
+    // Click it: the pick is taken, the overlay goes away, the target is stored.
+    const picked = await b.evaluate(`(() => {
+      const el = document.querySelector('#pick-target');
+      const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+      el.dispatchEvent(ev);
+      return {
+        prevented: ev.defaultPrevented,
+        overlayGone: !document.getElementById('rs-picker-hint') && !document.getElementById('rs-picker-box'),
+      };
+    })()`);
+    assert.equal(picked.prevented, true, 'the pick click must be swallowed, not passed to the page');
+    assert.equal(picked.overlayGone, true, 'the picker overlay must be removed after a pick');
+
+    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
+    assert.deepEqual(
+      stored.targets,
+      [{ selector: '#pick-target', mode: 'hook', events: 'both' }],
+      'the picked element must be saved as a hook target'
+    );
+
+    // The settings UI came back and lists it.
+    assert.equal(
+      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      true,
+      'settings must reopen after a pick'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelector('.rs-target-sel').textContent`),
+      '#pick-target',
+      'the target must be listed in settings'
+    );
+  });
+
+  test('picker: Escape cancels without adding a target', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel open'
+    );
+
+    await b.evaluate(`document.querySelector('#rs-pick').click()`);
+    await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
+
+    await b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    await b.waitUntil(
+      `!document.getElementById('rs-picker-hint')`,
+      'picker overlay to be removed by Escape'
+    );
+
+    assert.equal(
+      await b.evaluate(`window.__store.recentSubredditsSettings || null`),
+      null,
+      'cancelling must not write a target'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      true,
+      'settings must come back after cancelling'
+    );
+  });
+
+  test('picker: an already-configured element is not added twice', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings panel open'
+    );
+
+    // Pick the same element twice.
+    for (let i = 0; i < 2; i++) {
+      await b.evaluate(`document.querySelector('#rs-pick').click()`);
+      await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, `picker active (${i})`);
+      await b.evaluate(`(() => {
+        const el = document.querySelector('#pick-target');
+        el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        return true;
+      })()`);
+      await b.waitUntil(`!document.getElementById('rs-picker-hint')`, `picker closed (${i})`);
+    }
+
+    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
+    assert.equal(stored.targets.length, 1, `duplicate pick must not add a second entry, got ${JSON.stringify(stored.targets)}`);
+    assert.equal(
+      await b.evaluate(`document.querySelectorAll('.rs-target').length`),
+      1,
+      'the list must show exactly one row'
+    );
+  });
+
+  test('selector builder prefers an id, then a test id, then a path', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open'
+    );
+
+    // Read the selector the picker proposes for an element, without committing it.
+    const propose = async (sel) => {
+      await b.evaluate(`document.querySelector('#rs-pick').click()`);
+      await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
+      const text = await b.evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(sel)});
+        el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        return document.getElementById('rs-picker-hint').textContent;
+      })()`);
+      await b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+      await b.waitUntil(`!document.getElementById('rs-picker-hint')`, 'picker closed');
+      return text.replace(/\s+—.*$/, '').trim();
+    };
+
+    // An element with a usable id: the id wins.
+    assert.equal(await propose('#pick-target'), '#pick-target', 'a unique id should win');
+
+    // An element with only a data-testid (no id): the test id wins.
+    assert.equal(
+      await propose('[data-testid="testid-only"]'),
+      '[data-testid="testid-only"]',
+      'an element with no id should fall back to its data-testid'
+    );
+
+    // A deep child with no id and no test id: an nth-of-type path.
+    const path = await propose('#content .hashed-x1y2z3 .leaf');
+    assert.match(path, /span/, `a path selector should be produced, got: ${path}`);
+    assert.ok(path.includes('>'), `expected a descendant path, got: ${path}`);
+  });
+
+  test('hook target: hover opens the popup from a non-built-in element', async () => {
+    // Seed a hook target on #pick-target, which matches no built-in trigger.
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'hook', events: 'both' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup mounted');
+
+    assert.equal(await b.evaluate(isVisible), false, 'popup starts hidden');
+
+    await b.evaluate(`(() => {
+      const el = document.querySelector('#pick-target');
+      const o = { bubbles: true, cancelable: true, relatedTarget: document.body };
+      el.dispatchEvent(new MouseEvent('mouseover', o));
+      return true;
+    })()`);
+    await b.waitUntil(isVisible, 'popup to open from the hooked element');
+
+    // Anchored to the hooked element, not centred.
+    const geo = await b.evaluate(`(() => {
+      const t = document.querySelector('#pick-target').getBoundingClientRect();
+      const p = document.querySelector('${POPUP}').getBoundingClientRect();
+      return { triggerBottom: t.bottom, popupTop: p.top };
+    })()`);
+    assert.ok(
+      geo.popupTop >= geo.triggerBottom - 1 && geo.popupTop - geo.triggerBottom < 30,
+      `popup should anchor below the hooked element, got ${JSON.stringify(geo)}`
+    );
+  });
+
+  test('hook target: events=hover ignores clicks, events=click ignores hover', async () => {
+    const hoverTarget = `(() => {
+      const el = document.querySelector('#pick-target');
+      const o = { bubbles: true, cancelable: true, relatedTarget: document.body };
+      el.dispatchEvent(new MouseEvent('mouseover', o));
+      return true;
+    })()`;
+
+    const clickTarget = `document.querySelector('#pick-target').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))`;
+
+    const seed = (events) =>
+      fixtureUrl(DEFAULT_SEED) +
+      '&settings=' +
+      settingsParam({ targets: [{ selector: '#pick-target', mode: 'hook', events }] });
+
+    // --- hover only ---
+    await b.goto(seed('hover'));
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'mounted');
+    await b.evaluate(clickTarget);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(await b.evaluate(isVisible), false, 'a hover-only hook must ignore clicks');
+
+    await b.evaluate(hoverTarget);
+    await b.waitUntil(isVisible, 'hover-only hook opens on hover');
+
+    // --- click only ---
+    await b.goto(seed('click'));
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'mounted');
+    await b.evaluate(hoverTarget);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(await b.evaluate(isVisible), false, 'a click-only hook must ignore hover');
+
+    await b.evaluate(clickTarget);
+    await b.waitUntil(isVisible, 'click-only hook opens on click');
+  });
+
+  test('changing a target mode to replace persists it', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open'
+    );
+
+    // Pick an element, then switch its mode.
+    await b.evaluate(`document.querySelector('#rs-pick').click()`);
+    await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
+    await b.evaluate(`(() => {
+      const el = document.querySelector('#pick-target');
+      el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+    await b.waitUntil(`!document.getElementById('rs-picker-hint')`, 'picker closed');
+
+    const changed = await b.evaluate(`(() => {
+      const sel = document.querySelector('[data-role="mode"]');
+      sel.value = 'replace';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+    assert.equal(changed, true);
+
+    await b.waitUntil(
+      `JSON.parse(window.__store.recentSubredditsSettings).targets[0].mode === 'replace'`,
+      'the mode change to be persisted'
+    );
+
+    // A replace target has no event choice — the control is gone.
+    assert.equal(
+      await b.evaluate(`document.querySelector('[data-role="events"]')`),
+      null,
+      'the events selector must not be offered for a non-hook mode'
+    );
+  });
+
+  test('removing a target persists the removal', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open'
+    );
+
+    await b.evaluate(`document.querySelector('#rs-pick').click()`);
+    await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
+    await b.evaluate(`(() => {
+      const el = document.querySelector('#pick-target');
+      el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+    await b.waitUntil(`document.querySelectorAll('.rs-target').length === 1`, 'target listed');
+
+    await b.evaluate(`document.querySelector('[data-role="remove"]').click()`);
+    await b.waitUntil(
+      `JSON.parse(window.__store.recentSubredditsSettings).targets.length === 0`,
+      'the removal to be persisted'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelectorAll('.rs-target').length`),
+      0,
+      'the row must disappear'
+    );
+  });
+
+  test('a malformed stored target is dropped, not fatal', async () => {
+    const bad = settingsParam({
+      targets: [
+        null,
+        { mode: 'hook' },                                    // no selector
+        { selector: '   ' },                                 // blank selector
+        { selector: '#pick-target', mode: 'nonsense' },       // bad mode
+        { selector: '#logo', mode: 'hook', events: 'nope' },  // bad events
+      ],
+    });
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&settings=${bad}`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup mounted');
+
+    // Two survive, each repaired to a valid mode/events.
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open'
+    );
+
+    const rows = await b.evaluate(`Array.from(document.querySelectorAll('.rs-target')).map(li => ({
+      sel: li.querySelector('.rs-target-sel').textContent,
+      mode: li.querySelector('[data-role="mode"]').value,
+      events: li.querySelector('[data-role="events"]')?.value ?? null,
+    }))`);
+    assert.deepEqual(
+      rows,
+      [
+        { sel: '#pick-target', mode: 'hook', events: 'both' },
+        { sel: '#logo', mode: 'hook', events: 'both' },
+      ],
+      `malformed entries should be dropped and the rest repaired, got ${JSON.stringify(rows)}`
+    );
+
+    assert.deepEqual(await b.evaluate(`window.__errors`), [], 'a bad store must not throw');
   });
 
   test('WARNS once when no trigger selector matches', async () => {
