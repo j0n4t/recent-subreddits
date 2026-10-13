@@ -13,38 +13,7 @@ is fixed.
 
 ---
 
-## 1. Tests embed JavaScript as strings, so nothing can check them
-
-**Why it matters.** There are 237 `b.evaluate(\`...\`)` calls. The test logic
-lives inside template literals, which means:
-
-- **ESLint cannot see it.** `npx eslint tests/` reports 0 messages across 4 files
-  — not because the tests are clean, but because the rules stop at the string
-  boundary. A typo inside an `evaluate` is invisible to the linter.
-- **TypeScript cannot see it.** `tsconfig.json` covers `src` only.
-- **Escaping is manual and silent.** 7 lines carry `\\` escapes. This already bit
-  once during development: a `\\s` in a heredoc reached the page as `s` and
-  corrupted the output, which was only caught by reading it closely.
-
-**Fix.** A `run(fn, ...args)` helper in the harness that serialises a real
-function instead of a hand-written string:
-
-```js
-const width = await b.evaluate(run((sel) => {
-  const el = document.querySelector(sel);
-  return el ? el.getBoundingClientRect().width : null;
-}, '#pick-target'));
-```
-
-The function body is then real code — lintable, typecheckable, no escaping.
-Adopt it for new tests first; migrate existing ones as they are touched.
-
-**Done when.** No new test needs a backslash escape, and the lint scope covers
-test logic rather than skipping over it.
-
----
-
-## 2. Repeated preambles in the e2e suite
+## 1. Repeated preambles in the e2e suite
 
 **Why it matters.** Measured: 34 occurrences of the "hover the logo, wait for the
 popup" preamble and 29 of the "open settings, wait for `settings-open`" dance,
@@ -64,7 +33,7 @@ async function openByHotkey(b)   // for tests that seed their own targets
 
 ---
 
-## 3. Two `withStore` helpers in the unit suite
+## 2. Two `withStore` helpers in the unit suite
 
 **Why it matters.** `tests/unit/helpers.test.mjs` defines `withStore` at line 216
 (takes a pathname) and again at line 296 (does not). The second was added rather
@@ -77,7 +46,7 @@ drift.
 
 ---
 
-## 4. Index-based assertions in the tests
+## 3. Index-based assertions in the tests
 
 **Why it matters.** `targets[1].mode` and `.at(-1)` assume a row order. That is
 exactly what broke when the seeded built-in hook started appearing first: the
@@ -91,7 +60,7 @@ test picked — rather than by position.
 
 ---
 
-## 5. The built-in selector is duplicated across four files
+## 4. The built-in selector is duplicated across four files
 
 **Why it matters.** `TRIGGER_SELECTOR` is hand-copied into
 `tests/e2e/sidebar.test.mjs`, `tests/fixtures/reddit-mock.html` and
@@ -107,7 +76,7 @@ deliberate fixture copy, with a test tying them together.
 
 ---
 
-## 6. The measurements this design rests on are not preserved
+## 5. The measurements this design rests on are not preserved
 
 **Why it matters.** Several decisions depend on facts measured against the live
 site, and those facts are not written down anywhere durable:
@@ -131,7 +100,7 @@ claims cannot be re-verified without rewriting them.
 
 ---
 
-## 7. README has drifted from the code
+## 6. README has drifted from the code
 
 **Why it matters.** Two concrete regressions:
 
@@ -147,7 +116,7 @@ appears in `src/`.
 
 ---
 
-## 8. The e2e fixture is a `file://` page, so URL-dependent code is untestable
+## 7. The e2e fixture is a `file://` page, so URL-dependent code is untestable
 
 **Why it matters.** Because the fixture has no `/r/<name>/` path, `trackVisit()`
 never runs in e2e — the "a blacklisted subreddit is never tracked again" test had
@@ -163,7 +132,7 @@ in e2e.
 
 ---
 
-## 9. A harvest failure is silent
+## 8. A harvest failure is silent
 
 **Why it matters.** `checkTriggers()` warns when configured hooks match nothing,
 which makes a Reddit markup change visible. The harvest has the same failure
@@ -177,7 +146,7 @@ the exact bug this repo already fixed once — with nothing in the console.
 
 ---
 
-## 10. `escAttr` lives in `icons.js`
+## 9. `escAttr` lives in `icons.js`
 
 **Why it matters.** It is a generic HTML-escaping helper defined in the icon
 module and imported by `content.js` and `settings-panel.js` for unrelated
@@ -190,7 +159,7 @@ false, and a reader editing icon logic meets an HTML helper they did not expect.
 
 ---
 
-## 11. The injected stylesheet is never validated
+## 10. The injected stylesheet is never validated
 
 **Why it matters.** `injectStyles()` builds one large CSS string. A typo — a
 missing brace, a misspelled property — fails silently at runtime, and nothing
@@ -204,7 +173,7 @@ after injection. Cheap and it closes a whole failure class.
 
 ---
 
-## 12. Keyboard navigation in the popup
+## 11. Keyboard navigation in the popup
 
 **Why it matters.** The hotkey exists so the popup works regardless of Reddit's
 markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
@@ -215,7 +184,7 @@ existing trash/blocklist logic.
 
 ---
 
-## 13. Import / export settings
+## 12. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey
@@ -226,7 +195,7 @@ configuration is meaningful.
 
 ---
 
-## 14. Relative timestamps freeze while the popup is open
+## 13. Relative timestamps freeze while the popup is open
 
 **Why it matters.** `formatTimeAgo` runs at render only, so an open popup keeps
 showing "just now" indefinitely.
@@ -235,7 +204,7 @@ showing "just now" indefinitely.
 
 ---
 
-## 15. An inline target that matches nothing is silent
+## 14. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming
@@ -276,9 +245,10 @@ roughly in this order.
   indirection for no gain.
 - **Splitting the e2e test file.** It is 1977 lines, but a flat list of 61 tests
   that greps cleanly. Splitting it would scatter the shared fixture and helpers
-  for no gain — item 2 is the fix that actually reduces the weight.
+  for no gain — item 1 is the fix that actually reduces the weight.
 - **Typechecking `tests/`.** `tsconfig.json` covers `src` only. Extending it
-  would not help much while test logic lives in strings; item 1 is the fix that
-  makes typechecking tests meaningful.
+  would not help much while test logic lives in strings; the `run()` helper
+  (item 1, the deleted entry) is the fix that makes typechecking tests
+  meaningful.
 - **Multiple settings profiles.** The target model would support it, but nothing
   suggests the complexity is wanted.
