@@ -46,8 +46,8 @@ const panelCtl = {
 };
 
 /** Render the settings view into one instance (the popup by default). */
-function renderSettings(instance) {
-  renderSettingsPanel(instance || popupEl, panelCtl);
+function renderSettings(instance, openSection) {
+  renderSettingsPanel(instance || popupEl, panelCtl, openSection);
 }
 
 /**
@@ -160,7 +160,7 @@ function harvestIcon() {
   if (sidebarEl) renderContent(loadData());
 }
 
-function setSettingsOpen(open, instance) {
+function setSettingsOpen(open, instance, openSection) {
   const host = instance || popupEl;
   if (!host) return;
 
@@ -171,7 +171,7 @@ function setSettingsOpen(open, instance) {
   host.classList.toggle('settings-open', open);
   const title = host.querySelector('.rs-header');
   if (title) title.textContent = open ? HEADER_TITLE.settings : HEADER_TITLE.main;
-  if (open) renderSettings(host);
+  if (open) renderSettings(host, openSection);
   // The panel is a very different height from the list, so the popup has to be
   // placed again or it keeps the position chosen for the other view.
   if (host === popupEl) repositionPopup();

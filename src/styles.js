@@ -177,6 +177,34 @@ export function injectStyles() {
       cursor: pointer;
       accent-color: var(--rs-accent);
     }
+    /* ---- Accordion sections ---- */
+    .rs-acc-section { border-top: 1px solid var(--rs-border); }
+    .rs-acc-section:first-child { border-top: none; }
+    .rs-acc-header {
+      width: 100%;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--rs-text-muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-align: left;
+    }
+    .rs-acc-header::after {
+      content: '▾';
+      font-size: 10px;
+      transition: transform 0.15s;
+    }
+    .rs-acc-section.rs-acc-open .rs-acc-header::after { transform: rotate(180deg); }
+    .rs-acc-header:hover { color: var(--rs-text); }
+    .rs-acc-body { display: none; padding-bottom: 8px; }
+    .rs-acc-section.rs-acc-open .rs-acc-body { display: block; }
     .rs-status {
       font-size: 11px;
       min-height: 14px;

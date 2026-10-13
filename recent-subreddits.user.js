@@ -395,6 +395,34 @@
       cursor: pointer;
       accent-color: var(--rs-accent);
     }
+    /* ---- Accordion sections ---- */
+    .rs-acc-section { border-top: 1px solid var(--rs-border); }
+    .rs-acc-section:first-child { border-top: none; }
+    .rs-acc-header {
+      width: 100%;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--rs-text-muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-align: left;
+    }
+    .rs-acc-header::after {
+      content: '\u25BE';
+      font-size: 10px;
+      transition: transform 0.15s;
+    }
+    .rs-acc-section.rs-acc-open .rs-acc-header::after { transform: rotate(180deg); }
+    .rs-acc-header:hover { color: var(--rs-text); }
+    .rs-acc-body { display: none; padding-bottom: 8px; }
+    .rs-acc-section.rs-acc-open .rs-acc-body { display: block; }
     .rs-status {
       font-size: 11px;
       min-height: 14px;
@@ -1205,7 +1233,7 @@
   }
 
   // src/settings-panel.js
-  function renderSettingsPanel(instance, ctl2) {
+  function renderSettingsPanel(instance, ctl2, openSection) {
     const host = instance;
     if (!host) return;
     const panel = host.querySelector(".rs-settings-panel");
@@ -1239,46 +1267,64 @@
               </div>
             </li>`;
     }).join("") : '<li class="rs-empty">No page targets yet.</li>';
+    const sections = panel.querySelectorAll(".rs-acc-section");
+    const currentOpen = Array.from(sections).findIndex((s) => s.classList.contains("rs-acc-open"));
     panel.innerHTML = `
-    <div class="rs-field">
-      <label class="rs-label">Open popup hotkey</label>
-      <input class="rs-input rs-hotkey-input" type="text" readonly
-             value="${escAttr(settings.hotkey)}"
-             placeholder="Click and press a combination" />
-      <div class="rs-hint">Click the field, then press the keys you want.
-        Use at least one modifier (Ctrl / Alt / Shift / Meta).</div>
-    </div>
-
-    <div class="rs-field">
-      <div class="rs-label-row">
-        <label class="rs-label">Page targets</label>
-        <button class="rs-btn rs-btn-small" data-role="pick">Pick element\u2026</button>
+    <div class="rs-accordion">
+      <div class="rs-acc-section rs-acc-open">
+        <button type="button" class="rs-acc-header">Hotkey</button>
+        <div class="rs-acc-body">
+          <div class="rs-field">
+            <input class="rs-input rs-hotkey-input" type="text" readonly
+                   value="${escAttr(settings.hotkey)}"
+                   placeholder="Click and press a combination" />
+            <div class="rs-hint">Click the field, then press the keys you want.
+              Use at least one modifier (Ctrl / Alt / Shift / Meta).</div>
+          </div>
+        </div>
       </div>
-      <div class="rs-hint">Pick an element on the page, then choose what it does.
-        A hook opens the popup; the others render the list inline there.</div>
-      <ul class="rs-targets">${targetRows}</ul>
-      ${hasHook ? "" : `<div class="rs-warn">No hook configured, so hovering or
-        clicking will not open the popup. Press <b>${escAttr(settings.hotkey)}</b>
-        to open it, or add a hook above.</div>`}
-    </div>
-
-    <div class="rs-field">
-      <label class="rs-label">Blocked subreddits</label>
-      <textarea class="rs-input rs-blocked-input" rows="4" spellcheck="false"
-                placeholder="one subreddit per line">${escAttr(settings.blocked.join("\n"))}</textarea>
-      <div class="rs-hint">One subreddit per line, without the r/ \u2014 the \u{1F5D1} button
-        adds them here. A blocked subreddit is not tracked again, so delete its
-        line to let it back into the list.</div>
-    </div>
-
-    <div class="rs-field">
-      <label class="rs-check">
-        <input type="checkbox" class="rs-checkbox" data-role="hide-controls"
-               ${settings.hideRowControls ? "checked" : ""} />
-        <span>Hide row controls until hover</span>
-      </label>
-      <div class="rs-hint">Hides each row's \u{1F4CC} and \u{1F5D1}, and the \u2715 in the header,
-        until you hover the row they belong to. Keeps the list uncluttered.</div>
+      <div class="rs-acc-section">
+        <button type="button" class="rs-acc-header">Page targets</button>
+        <div class="rs-acc-body">
+          <div class="rs-field">
+            <div class="rs-label-row">
+              <button class="rs-btn rs-btn-small" data-role="pick">Pick element\u2026</button>
+            </div>
+            <div class="rs-hint">Pick an element on the page, then choose what it does.
+              A hook opens the popup; the others render the list inline there.</div>
+            <ul class="rs-targets">${targetRows}</ul>
+            ${hasHook ? "" : `<div class="rs-warn">No hook configured, so hovering or
+              clicking will not open the popup. Press <b>${escAttr(settings.hotkey)}</b>
+              to open it, or add a hook above.</div>`}
+          </div>
+        </div>
+      </div>
+      <div class="rs-acc-section">
+        <button type="button" class="rs-acc-header">Blocked subreddits</button>
+        <div class="rs-acc-body">
+          <div class="rs-field">
+            <textarea class="rs-input rs-blocked-input" rows="4" spellcheck="false"
+                      placeholder="one subreddit per line">${escAttr(settings.blocked.join("\n"))}</textarea>
+            <div class="rs-hint">One subreddit per line, without the r/ \u2014 the \u{1F5D1} button
+              adds them here. A blocked subreddit is not tracked again, so delete its
+              line to let it back into the list.</div>
+          </div>
+        </div>
+      </div>
+      <div class="rs-acc-section">
+        <button type="button" class="rs-acc-header">Display options</button>
+        <div class="rs-acc-body">
+          <div class="rs-field">
+            <label class="rs-check">
+              <input type="checkbox" class="rs-checkbox" data-role="hide-controls"
+                     ${settings.hideRowControls ? "checked" : ""} />
+              <span>Hide row controls until hover</span>
+            </label>
+            <div class="rs-hint">Hides each row's \u{1F4CC} and \u{1F5D1}, and the \u2715 in the header,
+              until you hover the row they belong to. Keeps the list uncluttered.</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="rs-status"></div>
@@ -1287,6 +1333,17 @@
       <button class="rs-btn rs-btn-primary" data-role="done">Done</button>
     </div>
   `;
+    const newSections = panel.querySelectorAll(".rs-acc-section");
+    const defaultOpen = openSection ?? Math.max(currentOpen, 0);
+    newSections.forEach((s, i) => s.classList.toggle("rs-acc-open", i === defaultOpen));
+    panel.querySelectorAll(".rs-acc-header").forEach((header) => {
+      header.addEventListener("click", () => {
+        const section = header.closest(".rs-acc-section");
+        const wasOpen = section.classList.contains("rs-acc-open");
+        panel.querySelectorAll(".rs-acc-section").forEach((s) => s.classList.remove("rs-acc-open"));
+        if (!wasOpen) section.classList.add("rs-acc-open");
+      });
+    });
     const input = panel.querySelector(".rs-hotkey-input");
     const say = (msg, kind) => {
       const el = panel.querySelector(".rs-status");
@@ -1344,7 +1401,7 @@
           say(`Added ${selector}`);
         },
         () => {
-          ctl2.setSettingsOpen(true);
+          ctl2.setSettingsOpen(true, host, 1);
           if (wasOpen) ctl2.togglePopup(true);
         }
       );
@@ -1403,7 +1460,7 @@
     });
     panel.querySelector('[data-role="done"]').addEventListener("click", (e) => {
       e.stopPropagation();
-      ctl2.setSettingsOpen(false);
+      ctl2.setSettingsOpen(false, host);
     });
   }
 
@@ -1625,8 +1682,8 @@
       activeHotkey = combo;
     }
   };
-  function renderSettings(instance) {
-    renderSettingsPanel(instance || popupEl, panelCtl);
+  function renderSettings(instance, openSection) {
+    renderSettingsPanel(instance || popupEl, panelCtl, openSection);
   }
   function refreshAll(data) {
     renderContent2(data);
@@ -1688,14 +1745,14 @@
     if (!harvestCurrentSubredditIcon(() => !!sidebarEl)) return;
     if (sidebarEl) renderContent2(loadData());
   }
-  function setSettingsOpen(open, instance) {
+  function setSettingsOpen(open, instance, openSection) {
     const host = instance || popupEl;
     if (!host) return;
     if (host === popupEl) settingsOpen = open;
     host.classList.toggle("settings-open", open);
     const title = host.querySelector(".rs-header");
     if (title) title.textContent = open ? HEADER_TITLE.settings : HEADER_TITLE.main;
-    if (open) renderSettings(host);
+    if (open) renderSettings(host, openSection);
     if (host === popupEl) repositionPopup();
   }
   var activeHotkey = null;

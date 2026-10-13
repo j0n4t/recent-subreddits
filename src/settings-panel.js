@@ -13,7 +13,7 @@ import { startPicker } from './picker.js';
  * Render the settings panel body into one instance's settings slot.
  * `instance` defaults to the popup; an inline target passes its own node.
  */
-export function renderSettingsPanel(instance, ctl) {
+export function renderSettingsPanel(instance, ctl, openSection) {
   const host = instance;
   if (!host) return;
   const panel = host.querySelector('.rs-settings-panel');
@@ -75,46 +75,67 @@ export function renderSettingsPanel(instance, ctl) {
   // The blacklist is a plain textarea of names (see the markup below), so there
   // are no rows to build here.
 
+  // Capture the currently-open section before replacing innerHTML —
+  // after the swap the template default (section 0) is all that's left.
+  const sections = panel.querySelectorAll('.rs-acc-section');
+  const currentOpen = Array.from(sections).findIndex((s) => s.classList.contains('rs-acc-open'));
+
   panel.innerHTML = `
-    <div class="rs-field">
-      <label class="rs-label">Open popup hotkey</label>
-      <input class="rs-input rs-hotkey-input" type="text" readonly
-             value="${escAttr(settings.hotkey)}"
-             placeholder="Click and press a combination" />
-      <div class="rs-hint">Click the field, then press the keys you want.
-        Use at least one modifier (Ctrl / Alt / Shift / Meta).</div>
-    </div>
-
-    <div class="rs-field">
-      <div class="rs-label-row">
-        <label class="rs-label">Page targets</label>
-        <button class="rs-btn rs-btn-small" data-role="pick">Pick element…</button>
+    <div class="rs-accordion">
+      <div class="rs-acc-section rs-acc-open">
+        <button type="button" class="rs-acc-header">Hotkey</button>
+        <div class="rs-acc-body">
+          <div class="rs-field">
+            <input class="rs-input rs-hotkey-input" type="text" readonly
+                   value="${escAttr(settings.hotkey)}"
+                   placeholder="Click and press a combination" />
+            <div class="rs-hint">Click the field, then press the keys you want.
+              Use at least one modifier (Ctrl / Alt / Shift / Meta).</div>
+          </div>
+        </div>
       </div>
-      <div class="rs-hint">Pick an element on the page, then choose what it does.
-        A hook opens the popup; the others render the list inline there.</div>
-      <ul class="rs-targets">${targetRows}</ul>
-      ${hasHook ? '' : `<div class="rs-warn">No hook configured, so hovering or
-        clicking will not open the popup. Press <b>${escAttr(settings.hotkey)}</b>
-        to open it, or add a hook above.</div>`}
-    </div>
-
-    <div class="rs-field">
-      <label class="rs-label">Blocked subreddits</label>
-      <textarea class="rs-input rs-blocked-input" rows="4" spellcheck="false"
-                placeholder="one subreddit per line">${escAttr(settings.blocked.join('\n'))}</textarea>
-      <div class="rs-hint">One subreddit per line, without the r/ — the 🗑 button
-        adds them here. A blocked subreddit is not tracked again, so delete its
-        line to let it back into the list.</div>
-    </div>
-
-    <div class="rs-field">
-      <label class="rs-check">
-        <input type="checkbox" class="rs-checkbox" data-role="hide-controls"
-               ${settings.hideRowControls ? 'checked' : ''} />
-        <span>Hide row controls until hover</span>
-      </label>
-      <div class="rs-hint">Hides each row's 📌 and 🗑, and the ✕ in the header,
-        until you hover the row they belong to. Keeps the list uncluttered.</div>
+      <div class="rs-acc-section">
+        <button type="button" class="rs-acc-header">Page targets</button>
+        <div class="rs-acc-body">
+          <div class="rs-field">
+            <div class="rs-label-row">
+              <button class="rs-btn rs-btn-small" data-role="pick">Pick element…</button>
+            </div>
+            <div class="rs-hint">Pick an element on the page, then choose what it does.
+              A hook opens the popup; the others render the list inline there.</div>
+            <ul class="rs-targets">${targetRows}</ul>
+            ${hasHook ? '' : `<div class="rs-warn">No hook configured, so hovering or
+              clicking will not open the popup. Press <b>${escAttr(settings.hotkey)}</b>
+              to open it, or add a hook above.</div>`}
+          </div>
+        </div>
+      </div>
+      <div class="rs-acc-section">
+        <button type="button" class="rs-acc-header">Blocked subreddits</button>
+        <div class="rs-acc-body">
+          <div class="rs-field">
+            <textarea class="rs-input rs-blocked-input" rows="4" spellcheck="false"
+                      placeholder="one subreddit per line">${escAttr(settings.blocked.join('\n'))}</textarea>
+            <div class="rs-hint">One subreddit per line, without the r/ — the 🗑 button
+              adds them here. A blocked subreddit is not tracked again, so delete its
+              line to let it back into the list.</div>
+          </div>
+        </div>
+      </div>
+      <div class="rs-acc-section">
+        <button type="button" class="rs-acc-header">Display options</button>
+        <div class="rs-acc-body">
+          <div class="rs-field">
+            <label class="rs-check">
+              <input type="checkbox" class="rs-checkbox" data-role="hide-controls"
+                     ${settings.hideRowControls ? 'checked' : ''} />
+              <span>Hide row controls until hover</span>
+            </label>
+            <div class="rs-hint">Hides each row's 📌 and 🗑, and the ✕ in the header,
+              until you hover the row they belong to. Keeps the list uncluttered.</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="rs-status"></div>
@@ -123,6 +144,21 @@ export function renderSettingsPanel(instance, ctl) {
       <button class="rs-btn rs-btn-primary" data-role="done">Done</button>
     </div>
   `;
+
+  // Accordion: one section open at a time, first open by default.
+  // `openSection` (0-based index) overrides the default when provided;
+  // otherwise the currently-open section is preserved across re-renders.
+  const newSections = panel.querySelectorAll('.rs-acc-section');
+  const defaultOpen = openSection ?? Math.max(currentOpen, 0);
+  newSections.forEach((s, i) => s.classList.toggle('rs-acc-open', i === defaultOpen));
+  panel.querySelectorAll('.rs-acc-header').forEach((header) => {
+    header.addEventListener('click', () => {
+      const section = header.closest('.rs-acc-section');
+      const wasOpen = section.classList.contains('rs-acc-open');
+      panel.querySelectorAll('.rs-acc-section').forEach((s) => s.classList.remove('rs-acc-open'));
+      if (!wasOpen) section.classList.add('rs-acc-open');
+    });
+  });
 
   const input = panel.querySelector('.rs-hotkey-input');
 
@@ -209,7 +245,9 @@ export function renderSettingsPanel(instance, ctl) {
       },
       () => {
         // Cancelled (Esc) or finished: bring the UI back either way.
-        ctl.setSettingsOpen(true);
+        // Open the Page targets section — the picker adds targets, so that is
+        // where the user's attention should land.
+        ctl.setSettingsOpen(true, host, 1);
         if (wasOpen) ctl.togglePopup(true);
       }
     );
@@ -300,6 +338,6 @@ export function renderSettingsPanel(instance, ctl) {
 
   panel.querySelector('[data-role="done"]').addEventListener('click', (e) => {
     e.stopPropagation();
-    ctl.setSettingsOpen(false);
+    ctl.setSettingsOpen(false, host);
   });
 }

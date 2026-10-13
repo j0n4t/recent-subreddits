@@ -355,6 +355,13 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     await openSettings();
 
+    // The blocklist lives in a collapsed accordion section — open it first.
+    await b.evaluate(run(() => {
+      const headers = document.querySelectorAll('.rs-acc-header');
+      headers[2].click(); // "Blocked subreddits"
+      return true;
+    }));
+
     const state = await b.evaluate(run(() => {
       const ta = document.querySelector('.rs-blocked-input');
       const cs = getComputedStyle(ta);
@@ -856,14 +863,23 @@ describe('recent-subreddits sidebar', { skip }, () => {
   });
 
   test('FIT: the settings panel is scrollable and its Done button stays reachable', async () => {
-    // A viewport too short for the ~590px panel: the popup caps and scrolls, and
+    // A viewport too short for the panel: the popup caps and scrolls, and
     // Done is the way OUT of the panel, so it must not be the thing that scrolls
     // out of reach. It is sticky for that reason.
-    await viewport(1280, 500);
+    await viewport(1280, 350);
     await b.goto(`${fixtureUrl({ recent: [{ name: 'a', visitedAt: Date.now() }], pinned: [] })}&iconDelay=999999`);
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
     await openPopup();
     await openPanel('settings panel open');
+
+    // Open all accordion sections so the panel is tall enough to overflow.
+    await b.evaluate(run(() => {
+      document.querySelectorAll('.rs-acc-header').forEach((h) => {
+        const section = h.closest('.rs-acc-section');
+        if (!section.classList.contains('rs-acc-open')) h.click();
+      });
+      return true;
+    }));
 
     const scrollable = await b.evaluate(run((popupSel) => {
       const p = document.querySelector(popupSel);
@@ -1397,6 +1413,84 @@ describe('recent-subreddits sidebar', { skip }, () => {
       true,
       'the target must be listed in settings'
     );
+  });
+
+  test('picker: after picking, the Page targets section is open', async () => {
+    await open();
+    await openSettings('settings panel open');
+
+    // Pick an element.
+    await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
+    await b.waitUntil(run(() => !!document.getElementById('rs-picker-hint')), 'picker active');
+    await b.evaluate(run(() => {
+      const el = document.querySelector('#pick-target');
+      el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      return true;
+    }));
+    await b.waitUntil(run(() => !document.getElementById('rs-picker-hint')), 'picker closed');
+
+    // The Page targets section (index 1) must be open, not the default Hotkey.
+    const state = await b.evaluate(run(() => {
+      const sections = document.querySelectorAll('.rs-acc-section');
+      return {
+        openIndex: Array.from(sections).findIndex((s) => s.classList.contains('rs-acc-open')),
+        total: sections.length,
+      };
+    }));
+    assert.equal(state.total, 4, 'there should be four accordion sections');
+    assert.equal(state.openIndex, 1, 'the Page targets section must be open after a pick');
+  });
+
+  test('picker: after Escape, the Page targets section is open', async () => {
+    await open();
+    await openSettings('settings panel open');
+
+    await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
+    await b.waitUntil(run(() => !!document.getElementById('rs-picker-hint')), 'picker active');
+    await b.evaluate(run(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))));
+    await b.waitUntil(run(() => !document.getElementById('rs-picker-hint')), 'picker closed');
+
+    const state = await b.evaluate(run(() => {
+      const sections = document.querySelectorAll('.rs-acc-section');
+      return Array.from(sections).findIndex((s) => s.classList.contains('rs-acc-open'));
+    }));
+    assert.equal(state, 1, 'the Page targets section must be open after cancelling');
+  });
+
+  test('inline block: Done returns to the main view', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'append' }] })
+    );
+    await b.waitUntil(run(() => !!document.querySelector('.rs-inline')), 'inline block to mount');
+
+    // Open settings from the inline gear.
+    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-settings-btn').click()));
+    await b.waitUntil(
+      run(() => document.querySelector('.rs-inline').classList.contains('settings-open')),
+      'inline settings open'
+    );
+
+    // Click Done.
+    await b.evaluate(run(() => document.querySelector('.rs-inline [data-role="done"]').click()));
+    await b.waitUntil(
+      run(() => !document.querySelector('.rs-inline').classList.contains('settings-open')),
+      'inline settings to close'
+    );
+
+    const state = await b.evaluate(run(() => {
+      const inst = document.querySelector('.rs-inline');
+      return {
+        settingsOpen: inst.classList.contains('settings-open'),
+        listVisible: getComputedStyle(inst.querySelector('.rs-content')).display !== 'none',
+        panelHidden: getComputedStyle(inst.querySelector('.rs-settings-panel')).display === 'none',
+      };
+    }));
+    assert.equal(state.settingsOpen, false, 'settings-open class must be removed');
+    assert.equal(state.listVisible, true, 'the list view must be visible again');
+    assert.equal(state.panelHidden, true, 'the settings panel must be hidden');
   });
 
   test('picker: Escape cancels without adding a target', async () => {
