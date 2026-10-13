@@ -137,12 +137,46 @@ describe('recent-subreddits sidebar', { skip }, () => {
     return b;
   }
 
+  /**
+   * Hover the built-in trigger and wait for the popup to show.
+   *
+   * The single place that knows how the popup opens: when the built-in trigger
+   * became a settings entry, every inline copy of this preamble had to be found
+   * and edited. `label` names the wait for a failing test.
+   */
+  async function openPopup(label = 'popup open') {
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, label);
+  }
+
+  /**
+   * Open the settings panel inside an already-open popup and wait for it.
+   *
+   * Split from openSettings() so a test that opens the popup another way — the
+   * hotkey, a seeded target — can reuse the panel half without re-hovering.
+   */
+  async function openPanel(label = 'settings open') {
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
+    await b.waitUntil(
+      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
+      label
+    );
+  }
+
+  /**
+   * Open the popup, then the settings panel inside it, and wait for the panel.
+   * Callers that need the list view first get it from openPopup().
+   */
+  async function openSettings(label = 'settings open') {
+    await openPopup();
+    await openPanel(label);
+  }
+
   test('mounts hidden, then shows on hover below the trigger', async () => {
     await open();
     assert.equal(await b.evaluate(isVisible), false, 'popup must start hidden');
 
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup to become visible on hover');
+    await openPopup('popup to become visible on hover');
 
     // Geometry, not just the class: popup sits just below the logo.
     const geo = await b.evaluate(run((popupSel) => {
@@ -162,16 +196,14 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // Reddit's SPA re-render swapped in fresh nodes with no listeners.
     await open();
 
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup on first hover');
+    await openPopup('popup on first hover');
     await b.evaluate(CLICK_BODY);
     await b.waitUntil(run(() => !document.querySelector('.recent-subreddits-popup')?.classList.contains('visible')), 'popup to close');
 
     await b.evaluate(RERENDER_HEADER);
 
     // Prove the nodes really are new (a no-op re-render would pass vacuously).
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup to show after the header was replaced');
+    await openPopup('popup to show after the header was replaced');
   });
 
   test('REGRESSION: hover works when the host wipes the injected wrapper', async () => {
@@ -202,8 +234,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'stylesheet must survive too'
     );
 
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup to show after re-mount');
+    await openPopup('popup to show after re-mount');
   });
 
   test('hover on a child of the trigger also opens it', async () => {
@@ -215,8 +246,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('remove: the trash drops a subreddit from history and persists it', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
 
     // Every recent row offers a trash; the Pinned section does not (it has its
     // own unpin control).
@@ -250,8 +280,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // The trash is a history control. r/linux is pinned, so it is filtered out of
     // Recent and only the unpin control applies to it.
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
 
     const state = await b.evaluate(run(() => ({
       linuxTrash: !!document.querySelector('.rs-remove-btn[data-name="linux"]'),
@@ -269,8 +298,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // The fixture pins r/linux, so clearing Recent must leave only the Pinned
     // section — no "no subreddits visited yet" line, because the list is not empty.
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
 
     for (const name of ['javascript', 'webdev', 'rust']) {
       await b.evaluate(run((name) => {
@@ -303,8 +331,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // test — see the "visit tracking" suite — because the fixture is a file://
     // page and so has no subreddit URL for the tracker to read.)
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
 
     assert.equal(
       await b.evaluate(run(() => document.querySelectorAll('.rs-blocked-list').length)),
@@ -326,13 +353,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.goto(`${fixtureUrl(DEFAULT_SEED)}&blocked=webdev,rust`);
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
 
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open'
-    );
+    await openSettings();
 
     const state = await b.evaluate(run(() => {
       const ta = document.querySelector('.rs-blocked-input');
@@ -361,13 +382,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.goto(`${fixtureUrl(DEFAULT_SEED)}&blocked=webdev,rust`);
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
 
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open'
-    );
+    await openSettings();
 
     // Delete r/rust's line and add two more — the real edit path: type, then
     // blur (which is what fires `change`).
@@ -397,13 +412,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.goto(`${fixtureUrl(DEFAULT_SEED)}&blocked=webdev`);
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
 
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open'
-    );
+    await openSettings();
 
     await b.evaluate(run(() => {
       const ta = document.querySelector('.rs-blocked-input');
@@ -425,13 +434,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.goto(`${fixtureUrl(DEFAULT_SEED)}&blocked=webdev`);
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
 
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open'
-    );
+    await openSettings();
 
     // The default hotkey is Alt+Shift+R; press it inside the field.
     await b.evaluate(run(() => {
@@ -476,8 +479,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('pin/unpin keeps the popup open and persists the change', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
 
     await b.evaluate(run(() => document.querySelector('.rs-pin-btn[data-name="javascript"]').click()));
     // Give the click handler a beat, then assert it stayed open.
@@ -707,8 +709,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
       ['close button', run(() => document.querySelector('.rs-close-btn').click())],
       ['Escape', run(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))],
     ]) {
-      await b.evaluate(HOVER('#logo'));
-      await b.waitUntil(isVisible, `popup open before testing ${label}`);
+      await openPopup(`popup open before testing ${label}`);
       await b.evaluate(close);
       await b.waitUntil(run(() => !document.querySelector('.recent-subreddits-popup')?.classList.contains('visible')), `popup to close via ${label}`);
     }
@@ -738,8 +739,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
 
     await b.evaluate(run(() => document.querySelector('#logo').style.cssText = 'position:fixed;bottom:2px;left:300px;'));
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
 
     const geo = await b.evaluate(run((popupSel) => {
       const t = document.querySelector('#logo').getBoundingClientRect();
@@ -755,8 +755,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('no uncaught errors during a full interaction run', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
     await b.evaluate(run(() => document.querySelector('.rs-pin-btn').click()));
     await b.evaluate(RERENDER_HEADER);
     await b.evaluate(HOVER('#logo'));
@@ -803,15 +802,10 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('settings modal opens, captures a new hotkey, and it takes effect', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
 
     // Open settings via the gear.
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings panel to open'
-    );
+    await openPanel('settings panel to open');
     assert.equal(
       await b.evaluate(run(() => getComputedStyle(document.querySelector('.rs-settings-panel')).display)),
       'block',
@@ -851,13 +845,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('settings rejects a combination without a modifier', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings panel open'
-    );
+    await openSettings('settings panel open');
 
     await b.evaluate(run(() => document.querySelector('.rs-hotkey-input').focus()));
     await b.evaluate(PRESS('k')); // bare letter
@@ -874,13 +862,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
   test('settings modal survives a pin change underneath it', async () => {
     // The popup node is persistent, so a content re-render must not close the modal.
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings panel open'
-    );
+    await openSettings('settings panel open');
 
     await b.evaluate(run(() => document.querySelector('.rs-pin-btn[data-name="javascript"]').click()));
     await b.waitUntil(
@@ -896,13 +878,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('settings modal resets the hotkey to the default', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings panel open'
-    );
+    await openSettings('settings panel open');
 
     await b.evaluate(run(() => document.querySelector('.rs-hotkey-input').focus()));
     await b.evaluate(PRESS('Ctrl+Shift+k'));
@@ -919,8 +895,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('header shows the back button and "Settings" title, gear hidden, and back returns', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
 
     // List view: main icon+title, no back button, gear present.
     const list = await b.evaluate(run(() => {
@@ -935,11 +910,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.equal(list.back, 'none', 'back button must be hidden in the list view');
     assert.notEqual(list.gear, 'none', 'gear must be visible in the list view');
 
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings panel open'
-    );
+    await openPanel('settings panel open');
 
     // Settings view: title swapped, back visible, gear hidden (redundant).
     const settings = await b.evaluate(run(() => {
@@ -970,8 +941,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('close button sits at the end of the header row, aligned with the popup edge', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
+    await openPopup();
 
     const geo = await b.evaluate(run((popupSel) => {
       const popup = document.querySelector(popupSel);
@@ -1015,13 +985,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('Escape closes the settings modal before the popup', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings panel open'
-    );
+    await openSettings('settings panel open');
 
     const ESC = `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`;
     await b.evaluate(ESC);
@@ -1040,13 +1004,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('picker: hovering outlines an element and clicking adds it as a hook target', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings panel open'
-    );
+    await openSettings('settings panel open');
 
     // Start picking. The popup must get out of the way so the page is pickable.
     await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
@@ -1119,13 +1077,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('picker: Escape cancels without adding a target', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings panel open'
-    );
+    await openSettings('settings panel open');
 
     await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
     await b.waitUntil(run(() => !!document.getElementById('rs-picker-hint')), 'picker active');
@@ -1150,13 +1102,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('picker: an already-configured element is not added twice', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings panel open'
-    );
+    await openSettings('settings panel open');
 
     // Pick the same element twice.
     for (let i = 0; i < 2; i++) {
@@ -1183,13 +1129,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('selector builder prefers an id, then a test id, then a path', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open'
-    );
+    await openSettings();
 
     // Read the selector the picker proposes for an element, without committing it.
     const propose = async (sel) => {
@@ -1290,13 +1230,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('changing a target mode to replace persists it', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open'
-    );
+    await openSettings();
 
     // Pick an element, then switch its mode.
     await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
@@ -1339,13 +1273,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
   test('removing a target persists the removal', async () => {
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open'
-    );
+    await openSettings();
 
     await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
     await b.waitUntil(run(() => !!document.getElementById('rs-picker-hint')), 'picker active');
@@ -1388,13 +1316,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup mounted');
 
     // Two survive, each repaired to a valid mode/events.
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open'
-    );
+    await openSettings();
 
     const rows = await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-target')).map(li => ({
       sel: li.querySelector('.rs-target-sel').textContent,
@@ -1795,6 +1717,8 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // supplies its own targets, so the seeded built-in hook is not present.
     await b.evaluate(PRESS('Alt+Shift+r'));
     await b.waitUntil(isVisible, 'popup open');
+    // Scoped to the popup: this page also has an inline block carrying its own
+    // gear, and an unscoped .rs-settings-btn would click that one instead.
     await b.evaluate(run(() => document.querySelector('.recent-subreddits-popup .rs-settings-btn').click()));
     await b.waitUntil(
       run(() => document.querySelector('.recent-subreddits-popup').classList.contains('settings-open')),
@@ -1868,13 +1792,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // ordinary settings entry now, which is what makes it visible and removable —
     // and what makes "reset" able to put it back.
     await open();
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open'
-    );
+    await openSettings();
 
     // It is listed, with the full built-in selector.
     const listed = await b.evaluate(run(() => {
@@ -1910,12 +1828,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // Reset restores it — a restore, not a wipe.
     await b.evaluate(PRESS('Alt+Shift+r'));
-    await b.waitUntil(isVisible, 'popup reopened by hotkey');
-    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
-    await b.waitUntil(
-      run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
-      'settings open again'
-    );
+    await openPanel('settings open again');
     await b.evaluate(run(() => document.querySelector('[data-role="reset"]').click()));
     await b.waitUntil(
       run(() => JSON.parse(window.__store.recentSubredditsSettings).targets.length === 1),
@@ -1936,8 +1849,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.evaluate(run(() => document.querySelector('[data-role="done"]').click()));
     await b.evaluate(CLICK_BODY);
     await b.waitUntil(run(() => !document.querySelector('.recent-subreddits-popup')?.classList.contains('visible')), 'popup closed');
-    await b.evaluate(HOVER('#logo'));
-    await b.waitUntil(isVisible, 'hover to open the popup again after reset');
+    await openPopup('hover to open the popup again after reset');
   });
 
   test('WARNS once when no trigger selector matches', async () => {
