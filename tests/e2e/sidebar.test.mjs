@@ -145,11 +145,11 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(isVisible, 'popup to become visible on hover');
 
     // Geometry, not just the class: popup sits just below the logo.
-    const geo = await b.evaluate(`(() => {
+    const geo = await b.evaluate(run((popupSel) => {
       const t = document.querySelector('#logo').getBoundingClientRect();
-      const p = document.querySelector('${POPUP}').getBoundingClientRect();
+      const p = document.querySelector(popupSel).getBoundingClientRect();
       return { triggerBottom: t.bottom, popupTop: p.top, popupLeft: p.left, winW: innerWidth };
-    })()`);
+    }, POPUP));
     assert.ok(
       geo.popupTop >= geo.triggerBottom && geo.popupTop - geo.triggerBottom < 30,
       `popup should sit just below the trigger, got ${JSON.stringify(geo)}`
@@ -179,25 +179,25 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // Detach and re-check inside ONE evaluation: the MutationObserver re-mounts
     // on its own tick, so a separate evaluate would race it.
-    const detached = await b.evaluate(`(() => {
+    const detached = await b.evaluate(run(() => {
       document.querySelector('.recent-subreddits-container').remove();
       return !document.querySelector('.recent-subreddits-container');
-    })()`);
+    }));
     assert.equal(detached, true, 'wrapper should be detached immediately after remove()');
 
     // Nudge the DOM so the observer runs, then expect re-mount.
-    await b.evaluate(`document.body.appendChild(document.createElement('span'))`);
+    await b.evaluate(run(() => document.body.appendChild(document.createElement('span'))));
     await b.waitUntil(
       `!!document.querySelector('.recent-subreddits-container')`,
       'wrapper to be re-mounted by the observer'
     );
     assert.equal(
-      await b.evaluate(`document.querySelectorAll('.recent-subreddits-container').length`),
+      await b.evaluate(run(() => document.querySelectorAll('.recent-subreddits-container').length)),
       1,
       're-mount must not duplicate the wrapper'
     );
     assert.equal(
-      await b.evaluate(`!!document.getElementById('rs-styles')`),
+      await b.evaluate(run(() => !!document.getElementById('rs-styles'))),
       true,
       'stylesheet must survive too'
     );
@@ -220,15 +220,15 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // Every recent row offers a trash; the Pinned section does not (it has its
     // own unpin control).
-    const controls = await b.evaluate(`({
+    const controls = await b.evaluate(run(() => ({
       recentRows: document.querySelectorAll('.rs-section:not(.rs-pinned-section) .rs-item').length,
       trashes: document.querySelectorAll('.rs-remove-btn').length,
       trashesInPinned: document.querySelectorAll('.rs-pinned-section .rs-remove-btn').length,
-    })`);
+    })));
     assert.equal(controls.trashes, controls.recentRows, 'every recent row needs a trash');
     assert.equal(controls.trashesInPinned, 0, 'the pinned section must not get a trash');
 
-    await b.evaluate(`document.querySelector('.rs-remove-btn[data-name="webdev"]').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-remove-btn[data-name="webdev"]').click()));
 
     await b.waitUntil(
       `!Array.from(document.querySelectorAll('.rs-link')).some(a => a.textContent === 'r/webdev')`,
@@ -238,7 +238,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.equal(await b.evaluate(isVisible), true, 'popup must stay open after removing');
 
     // Persisted, not just rendered — a reload must not bring it back.
-    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubreddits`));
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubreddits)));
     assert.deepEqual(
       stored.recent.map((r) => r.name),
       ['javascript', 'linux', 'rust'],
@@ -253,13 +253,13 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
 
-    const state = await b.evaluate(`({
+    const state = await b.evaluate(run(() => ({
       linuxTrash: !!document.querySelector('.rs-remove-btn[data-name="linux"]'),
       linuxInRecent: Array.from(document.querySelectorAll('.rs-section:not(.rs-pinned-section) .rs-link'))
         .some(a => a.textContent === 'r/linux'),
       linuxPinned: Array.from(document.querySelectorAll('.rs-pinned .rs-link'))
         .some(a => a.textContent === 'r/linux'),
-    })`);
+    })));
     assert.equal(state.linuxInRecent, false, 'a pinned subreddit must not be listed under Recent');
     assert.equal(state.linuxPinned, true, 'r/linux should be pinned in this fixture');
     assert.equal(state.linuxTrash, false, 'a pinned subreddit must not offer a trash');
@@ -273,19 +273,21 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(isVisible, 'popup open');
 
     for (const name of ['javascript', 'webdev', 'rust']) {
-      await b.evaluate(`document.querySelector('.rs-remove-btn[data-name="${name}"]').click()`);
+      await b.evaluate(run((name) => {
+        document.querySelector(`.rs-remove-btn[data-name="${name}"]`).click();
+      }, name));
       await b.waitUntil(
         `!document.querySelector('.rs-remove-btn[data-name="${name}"]')`,
         `r/${name} to be removed`
       );
     }
 
-    const state = await b.evaluate(`({
+    const state = await b.evaluate(run(() => ({
       recentSection: !!document.querySelector('.rs-section:not(.rs-pinned-section)'),
       pinned: Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent),
       empty: !!document.querySelector('.rs-empty'),
       stored: JSON.parse(window.__store.recentSubreddits).recent.map(r => r.name),
-    })`);
+    })));
     assert.deepEqual(state.pinned, ['r/linux'], 'the pin must survive a history clear');
     assert.equal(state.recentSection, false, 'the Recent section should be gone once empty');
     assert.equal(state.empty, false, 'a non-empty Pinned list must not show the empty state');
@@ -305,18 +307,18 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(isVisible, 'popup open');
 
     assert.equal(
-      await b.evaluate(`document.querySelectorAll('.rs-blocked-list').length`),
+      await b.evaluate(run(() => document.querySelectorAll('.rs-blocked-list').length)),
       0,
       'the blacklist UI only exists inside the settings panel'
     );
 
-    await b.evaluate(`document.querySelector('.rs-remove-btn[data-name="webdev"]').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-remove-btn[data-name="webdev"]').click()));
     await b.waitUntil(
       `!document.querySelector('.rs-remove-btn[data-name="webdev"]')`,
       'r/webdev to be removed'
     );
 
-    const blocked = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`)).blocked;
+    const blocked = JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).blocked;
     assert.deepEqual(blocked, ['webdev'], 'the removal must blacklist the subreddit');
   });
 
@@ -326,19 +328,19 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
     );
 
-    const state = await b.evaluate(`(() => {
+    const state = await b.evaluate(run(() => {
       const ta = document.querySelector('.rs-blocked-input');
       const cs = getComputedStyle(ta);
       return {
         tag: ta.tagName,
         value: ta.value,
-        lines: ta.value.split('\\n'),
+        lines: ta.value.split('\n'),
         // Must be a real multi-line field, not a text input.
         rows: ta.rows,
         height: Math.round(ta.getBoundingClientRect().height),
@@ -346,7 +348,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
         // The old per-row list must be gone.
         oldList: !!document.querySelector('.rs-blocked-list'),
       };
-    })()`);
+    }));
 
     assert.equal(state.tag, 'TEXTAREA', 'the blocklist must be a textarea');
     assert.deepEqual(state.lines, ['webdev', 'rust'], 'one subreddit per line, in order');
@@ -361,7 +363,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
@@ -369,15 +371,15 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // Delete r/rust's line and add two more — the real edit path: type, then
     // blur (which is what fires `change`).
-    await b.evaluate(`(() => {
+    await b.evaluate(run(() => {
       const ta = document.querySelector('.rs-blocked-input');
-      ta.value = 'webdev\\n  Linux  \\nr/webdev\\n';
+      ta.value = 'webdev\n  Linux  \nr/webdev\n';
       ta.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
-    })()`);
+    }));
 
     const stored = JSON.parse(
-      await b.evaluate(`window.__store.recentSubredditsSettings`)
+      await b.evaluate(run(() => window.__store.recentSubredditsSettings))
     ).blocked;
     // Normalized: trimmed, lowercased, r/ prefix stripped, duplicates dropped,
     // blank lines ignored.
@@ -385,7 +387,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // The field itself keeps what was typed (not re-rendered underneath the user).
     assert.equal(
-      await b.evaluate(`document.querySelector('.rs-blocked-input').value`),
+      await b.evaluate(run(() => document.querySelector('.rs-blocked-input').value)),
       'webdev\n  Linux  \nr/webdev\n',
       'the textarea must not be rewritten while the user is editing'
     );
@@ -397,21 +399,21 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
     );
 
-    await b.evaluate(`(() => {
+    await b.evaluate(run(() => {
       const ta = document.querySelector('.rs-blocked-input');
       ta.value = '';
       ta.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
-    })()`);
+    }));
 
     assert.deepEqual(
-      JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`)).blocked,
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).blocked,
       [],
       'an empty textarea must clear the blocklist'
     );
@@ -425,25 +427,25 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
     );
 
     // The default hotkey is Alt+Shift+R; press it inside the field.
-    await b.evaluate(`(() => {
+    await b.evaluate(run(() => {
       const ta = document.querySelector('.rs-blocked-input');
       ta.focus();
       ta.dispatchEvent(new KeyboardEvent('keydown', {
         key: 'r', altKey: true, shiftKey: true, bubbles: true, cancelable: true,
       }));
       return true;
-    })()`);
+    }));
 
     assert.equal(await b.evaluate(isVisible), true, 'the popup must not toggle from a key in the field');
     assert.equal(
-      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      await b.evaluate(run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP)),
       true,
       'settings must stay open'
     );
@@ -459,13 +461,13 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    await b.evaluate(`document.querySelector('.rs-inline .rs-remove-btn[data-name="rust"]').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-remove-btn[data-name="rust"]').click()));
     await b.waitUntil(
       `!document.querySelector('.rs-inline .rs-remove-btn[data-name="rust"]')`,
       'r/rust to disappear from the inline block'
     );
 
-    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubreddits`));
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubreddits)));
     assert.ok(
       !stored.recent.some((r) => r.name === 'rust'),
       `the inline removal must persist, got ${JSON.stringify(stored.recent.map((r) => r.name))}`
@@ -477,7 +479,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
 
-    await b.evaluate(`document.querySelector('.rs-pin-btn[data-name="javascript"]').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-pin-btn[data-name="javascript"]').click()));
     // Give the click handler a beat, then assert it stayed open.
     await b.waitUntil(
       `document.querySelectorAll('.rs-pinned .rs-link').length === 2`,
@@ -485,30 +487,28 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     assert.equal(await b.evaluate(isVisible), true, 'popup must stay open after pinning');
     assert.deepEqual(
-      await b.evaluate(`Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent)`),
+      await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent))),
       ['r/javascript', 'r/linux']
     );
 
-    await b.evaluate(`document.querySelector('.rs-unpin-btn[data-name="linux"]').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-unpin-btn[data-name="linux"]').click()));
     await b.waitUntil(
       `document.querySelectorAll('.rs-pinned .rs-link').length === 1`,
       'r/linux to be unpinned'
     );
     assert.equal(await b.evaluate(isVisible), true, 'popup must stay open after unpinning');
     assert.deepEqual(
-      await b.evaluate(`Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent)`),
+      await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent))),
       ['r/javascript']
     );
 
     // Unpinned r/linux returns to the Recent list, and the stale entry is gone
     // from Pinned — assert absence, not just presence.
-    const recentNames = await b.evaluate(
-      `Array.from(document.querySelectorAll('.rs-section:not(.rs-pinned-section) .rs-link')).map(a => a.textContent)`
-    );
+    const recentNames = await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-section:not(.rs-pinned-section) .rs-link')).map(a => a.textContent)));
     assert.ok(recentNames.includes('r/linux'), `r/linux should return to Recent, got ${recentNames}`);
 
     // The change must be persisted, not just rendered.
-    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubreddits`));
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubreddits)));
     assert.deepEqual(stored.pinned, ['javascript'], 'pin state must be written to GM storage');
   });
 
@@ -518,7 +518,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open(DEFAULT_SEED, 400);
 
     assert.match(
-      await b.evaluate(`document.querySelector('.rs-icon').getAttribute('src')`),
+      await b.evaluate(run(() => document.querySelector('.rs-icon').getAttribute('src'))),
       /^data:image\/svg\+xml/,
       'icon should start as the inline placeholder'
     );
@@ -529,15 +529,15 @@ describe('recent-subreddits sidebar', { skip }, () => {
       15000
     );
 
-    const pairs = await b.evaluate(`Array.from(document.querySelectorAll('.rs-icon')).map(i => ({
+    const pairs = await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-icon')).map(i => ({
       name: decodeURIComponent(i.dataset.name),
       src: i.getAttribute('src'),
-    }))`);
+    }))));
     for (const { name, src } of pairs) {
       assert.equal(src, `https://icons.test/${name}.png`, `icon for ${name} mapped to the wrong src`);
     }
     assert.equal(
-      await b.evaluate(`window.__xhrCalls.length`),
+      await b.evaluate(run(() => window.__xhrCalls.length)),
       pairs.length,
       'exactly one request per distinct subreddit (no duplicate fetches)'
     );
@@ -558,13 +558,13 @@ describe('recent-subreddits sidebar', { skip }, () => {
       25000
     );
 
-    const state = await b.evaluate(`(() => ({
+    const state = await b.evaluate(run(() => ({
       attempts: window.__iconAttempts,
       srcs: Array.from(document.querySelectorAll('.rs-icon')).map(i => ({
         name: decodeURIComponent(i.dataset.name),
         src: i.getAttribute('src'),
       })),
-    }))()`);
+    })));
 
     // Retried: the failing subreddits got extra attempts...
     assert.ok(
@@ -599,12 +599,12 @@ describe('recent-subreddits sidebar', { skip }, () => {
       20000
     );
 
-    const timing = await b.evaluate(`(() => {
+    const timing = await b.evaluate(run(() => {
       const t = window.__xhrTimes || [];
       const gaps = [];
       for (let i = 1; i < t.length; i++) gaps.push(Math.round(t[i] - t[i - 1]));
       return { count: t.length, gaps, minGap: gaps.length ? Math.min(...gaps) : null };
-    })()`);
+    }));
 
     assert.ok(timing.count > 1, `expected several icon requests, got ${timing.count}`);
     assert.ok(
@@ -621,11 +621,11 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.goto(`${fixtureUrl(DEFAULT_SEED)}&sub=javascript`);
     await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
 
-    const harvested = await b.evaluate(`(() => {
+    const harvested = await b.evaluate(run(() => {
       const img = Array.from(document.querySelectorAll('.rs-icon'))
         .find(i => decodeURIComponent(i.dataset.name) === 'javascript');
       return { src: img ? img.getAttribute('src') : null, harvestUrl: window.__harvestIconUrl };
-    })()`);
+    }));
     assert.equal(
       harvested.src,
       harvested.harvestUrl,
@@ -633,14 +633,12 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
 
     // And it must NOT have been fetched: that is the whole point.
-    const fetched = await b.evaluate(
-      `window.__xhrCalls.filter(u => /\\/r\\/javascript\\/about\\.json/.test(u)).length`
-    );
+    const fetched = await b.evaluate(run(() => window.__xhrCalls.filter(u => /\/r\/javascript\/about\.json/.test(u)).length));
     assert.equal(fetched, 0, 'a harvested icon must not also trigger an about.json fetch');
 
     // Other rows still need the fallback, so they do fetch.
     assert.ok(
-      (await b.evaluate(`window.__xhrCalls.length`)) > 0,
+      (await b.evaluate(run(() => window.__xhrCalls.length))) > 0,
       'subreddits without a harvestable icon must still use the fallback'
     );
   });
@@ -654,13 +652,13 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.goto(`${fixtureUrl(DEFAULT_SEED)}&sub=linux&subStale=javascript`);
     await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
 
-    const state = await b.evaluate(`(() => {
+    const state = await b.evaluate(run(() => {
       const rows = Array.from(document.querySelectorAll('.rs-icon')).map(i => ({
         name: decodeURIComponent(i.dataset.name),
         src: i.getAttribute('src'),
       }));
       return { rows, harvestUrl: window.__harvestIconUrl };
-    })()`);
+    }));
 
     // The header names r/javascript, so the icon is filed there — never on
     // r/linux's row, even though the URL says linux.
@@ -685,7 +683,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.goto(`${fixtureUrl(DEFAULT_SEED)}&sub=javascript`);
     await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
 
-    const adopted = await b.evaluate(`(() => {
+    const adopted = await b.evaluate(run(() => {
       // Poison the anchor with a non-reddit URL, then force a harvest by opening
       // the popup (which harvests before showing).
       const el = document.querySelector('#subreddit-icon-img img');
@@ -694,7 +692,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
       const img = Array.from(document.querySelectorAll('.rs-icon'))
         .find(i => decodeURIComponent(i.dataset.name) === 'javascript');
       return img ? img.getAttribute('src') : null;
-    })()`);
+    }));
     assert.ok(
       !String(adopted).includes('evil.example.com'),
       `a non-redditmedia URL must never be adopted, got ${adopted}`
@@ -720,34 +718,34 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
 
     // First click opens the popup and must swallow the navigation.
-    const first = await b.evaluate(`(() => {
+    const first = await b.evaluate(run(() => {
       const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
       document.querySelector('#logo').dispatchEvent(ev);
-      return { prevented: ev.defaultPrevented, open: ${isVisible} };
-    })()`);
+      return { prevented: ev.defaultPrevented, open: !!document.querySelector('.recent-subreddits-popup')?.classList.contains('visible') };
+    }));
     assert.deepEqual(first, { prevented: true, open: true }, 'opening click should preventDefault');
 
     // Second click closes it and must let the link through.
-    const second = await b.evaluate(`(() => {
+    const second = await b.evaluate(run(() => {
       const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
       document.querySelector('#logo').dispatchEvent(ev);
-      return { prevented: ev.defaultPrevented, open: ${isVisible} };
-    })()`);
+      return { prevented: ev.defaultPrevented, open: !!document.querySelector('.recent-subreddits-popup')?.classList.contains('visible') };
+    }));
     assert.deepEqual(second, { prevented: false, open: false }, 'closing click must not preventDefault');
   });
 
   test('flips above the trigger when there is no room below', async () => {
     await open();
 
-    await b.evaluate(`document.querySelector('#logo').style.cssText = 'position:fixed;bottom:2px;left:300px;'`);
+    await b.evaluate(run(() => document.querySelector('#logo').style.cssText = 'position:fixed;bottom:2px;left:300px;'));
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
 
-    const geo = await b.evaluate(`(() => {
+    const geo = await b.evaluate(run((popupSel) => {
       const t = document.querySelector('#logo').getBoundingClientRect();
-      const p = document.querySelector('${POPUP}').getBoundingClientRect();
+      const p = document.querySelector(popupSel).getBoundingClientRect();
       return { triggerTop: Math.round(t.top), popupBottom: Math.round(p.bottom), popupTop: Math.round(p.top), winH: innerHeight };
-    })()`);
+    }, POPUP));
     assert.ok(
       geo.popupBottom <= geo.triggerTop + 1,
       `popup should flip above the trigger, got ${JSON.stringify(geo)}`
@@ -759,12 +757,12 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-pin-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-pin-btn').click()));
     await b.evaluate(RERENDER_HEADER);
     await b.evaluate(HOVER('#logo'));
     await b.evaluate(CLICK_BODY);
 
-    const errors = await b.evaluate(`window.__errors`);
+    const errors = await b.evaluate(run(() => window.__errors));
     assert.deepEqual(errors, [], `page reported errors: ${JSON.stringify(errors)}`);
   });
 
@@ -780,10 +778,10 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(isVisible, 'popup to open via hotkey');
 
     // Centred, since there is no trigger to anchor to.
-    const geo = await b.evaluate(`(() => {
-      const p = document.querySelector('${POPUP}').getBoundingClientRect();
+    const geo = await b.evaluate(run((popupSel) => {
+      const p = document.querySelector(popupSel).getBoundingClientRect();
       return { left: Math.round(p.left), top: Math.round(p.top), winW: innerWidth, winH: innerHeight };
-    })()`);
+    }, POPUP));
     assert.ok(Math.abs(geo.left - (geo.winW - 280) / 2) < 2, `hotkey popup should be centred horizontally: ${JSON.stringify(geo)}`);
     assert.ok(geo.top > 0, `centred popup must be on screen: ${JSON.stringify(geo)}`);
   });
@@ -809,33 +807,33 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(isVisible, 'popup open');
 
     // Open settings via the gear.
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel to open'
     );
     assert.equal(
-      await b.evaluate(`getComputedStyle(document.querySelector('.rs-settings-panel')).display`),
+      await b.evaluate(run(() => getComputedStyle(document.querySelector('.rs-settings-panel')).display)),
       'block',
       'settings panel should be visible'
     );
 
     // Focus the field and press a new combination.
-    await b.evaluate(`document.querySelector('.rs-hotkey-input').focus()`);
+    await b.evaluate(run(() => document.querySelector('.rs-hotkey-input').focus()));
     await b.evaluate(PRESS('Ctrl+Shift+k'));
 
     assert.equal(
-      await b.evaluate(`document.querySelector('.rs-hotkey-input').value`),
+      await b.evaluate(run(() => document.querySelector('.rs-hotkey-input').value)),
       'Ctrl+Shift+K',
       'field should show the captured combination'
     );
 
     // Persisted, not just displayed.
-    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings)));
     assert.equal(stored.hotkey, 'Ctrl+Shift+K', 'new hotkey must be written to storage');
 
     // The old combo no longer works, the new one does.
-    await b.evaluate(`document.querySelector('[data-role="done"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="done"]').click()));
     await b.waitUntil(
       `!document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel to close'
@@ -855,19 +853,19 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel open'
     );
 
-    await b.evaluate(`document.querySelector('.rs-hotkey-input').focus()`);
+    await b.evaluate(run(() => document.querySelector('.rs-hotkey-input').focus()));
     await b.evaluate(PRESS('k')); // bare letter
 
-    const status = await b.evaluate(`document.querySelector('.rs-status').textContent`);
+    const status = await b.evaluate(run(() => document.querySelector('.rs-status').textContent));
     assert.match(status, /modifier/i, `expected a modifier warning, got: ${status}`);
     assert.equal(
-      JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`)).hotkey,
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).hotkey,
       'Alt+Shift+R',
       'an invalid combination must not replace the hotkey'
     );
@@ -878,19 +876,19 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel open'
     );
 
-    await b.evaluate(`document.querySelector('.rs-pin-btn[data-name="javascript"]').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-pin-btn[data-name="javascript"]').click()));
     await b.waitUntil(
       `document.querySelectorAll('.rs-pinned .rs-link').length === 2`,
       'pin to take effect'
     );
     assert.equal(
-      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      await b.evaluate(run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP)),
       true,
       'settings must stay open across a content re-render'
     );
@@ -900,22 +898,22 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel open'
     );
 
-    await b.evaluate(`document.querySelector('.rs-hotkey-input').focus()`);
+    await b.evaluate(run(() => document.querySelector('.rs-hotkey-input').focus()));
     await b.evaluate(PRESS('Ctrl+Shift+k'));
-    await b.evaluate(`document.querySelector('[data-role="reset"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="reset"]').click()));
 
     assert.equal(
-      await b.evaluate(`document.querySelector('.rs-hotkey-input').value`),
+      await b.evaluate(run(() => document.querySelector('.rs-hotkey-input').value)),
       'Alt+Shift+R',
       'reset should restore the default in the field'
     );
-    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings)));
     assert.equal(stored.hotkey, 'Alt+Shift+R', 'reset should persist the default');
   });
 
@@ -925,45 +923,45 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(isVisible, 'popup open');
 
     // List view: main icon+title, no back button, gear present.
-    const list = await b.evaluate(`(() => {
+    const list = await b.evaluate(run(() => {
       const q = (s) => document.querySelector(s);
       return {
         title: q('.rs-header').textContent,
         back: getComputedStyle(q('.rs-back-btn')).display,
         gear: getComputedStyle(q('.rs-settings-btn')).display,
       };
-    })()`);
+    }));
     assert.equal(list.title, '📋 Recent Subreddits', 'list view should show the main icon+title');
     assert.equal(list.back, 'none', 'back button must be hidden in the list view');
     assert.notEqual(list.gear, 'none', 'gear must be visible in the list view');
 
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel open'
     );
 
     // Settings view: title swapped, back visible, gear hidden (redundant).
-    const settings = await b.evaluate(`(() => {
+    const settings = await b.evaluate(run(() => {
       const q = (s) => document.querySelector(s);
       return {
         title: q('.rs-header').textContent,
         back: getComputedStyle(q('.rs-back-btn')).display,
         gear: getComputedStyle(q('.rs-settings-btn')).display,
       };
-    })()`);
+    }));
     assert.equal(settings.title, '⚙ Settings', 'settings view should show its own icon+title');
     assert.notEqual(settings.back, 'none', 'back button must be visible in settings');
     assert.equal(settings.gear, 'none', 'gear is redundant next to the Settings title and must be hidden');
 
     // The back button is the way out, and it restores the list view.
-    await b.evaluate(`document.querySelector('.rs-back-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-back-btn').click()));
     await b.waitUntil(
       `!document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'back button to close the settings panel'
     );
     assert.equal(
-      await b.evaluate(`document.querySelector('.rs-header').textContent`),
+      await b.evaluate(run(() => document.querySelector('.rs-header').textContent)),
       '📋 Recent Subreddits',
       'back must restore the main title'
     );
@@ -975,8 +973,8 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
 
-    const geo = await b.evaluate(`(() => {
-      const popup = document.querySelector('${POPUP}');
+    const geo = await b.evaluate(run((popupSel) => {
+      const popup = document.querySelector(popupSel);
       const close = document.querySelector('.rs-close-btn');
       const title = document.querySelector('.rs-header');
       const gear = document.querySelector('.rs-settings-btn');
@@ -997,7 +995,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
         isLastChild: row.lastElementChild === close,
         childOrder: Array.from(row.children).map((el) => el.className),
       };
-    })()`);
+    }, POPUP));
 
     // The core of the change: the close button is a flex item on the header row,
     // not an absolutely-positioned glyph floating over the popup corner.
@@ -1019,7 +1017,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel open'
@@ -1028,7 +1026,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     const ESC = `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`;
     await b.evaluate(ESC);
     assert.equal(
-      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      await b.evaluate(run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP)),
       false,
       'first Escape closes the modal'
     );
@@ -1044,31 +1042,31 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel open'
     );
 
     // Start picking. The popup must get out of the way so the page is pickable.
-    await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
     await b.waitUntil(
       `!!document.getElementById('rs-picker-hint')`,
       'picker overlay to appear'
     );
     assert.equal(
-      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('visible')`),
+      await b.evaluate(run((popupSel) => document.querySelector(popupSel).classList.contains('visible'), POPUP)),
       false,
       'the popup must close so the whole page can be picked'
     );
 
     // Hover the target: the outline box follows it and the hint names a selector.
-    await b.evaluate(`(() => {
+    await b.evaluate(run(() => {
       const el = document.querySelector('#pick-target');
       el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
       return true;
-    })()`);
-    const hovered = await b.evaluate(`(() => {
+    }));
+    const hovered = await b.evaluate(run(() => {
       const box = document.getElementById('rs-picker-box');
       const hint = document.getElementById('rs-picker-hint');
       const r = document.querySelector('#pick-target').getBoundingClientRect();
@@ -1078,7 +1076,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
         targetW: Math.round(r.width),
         hint: hint.textContent,
       };
-    })()`);
+    }));
     assert.equal(hovered.display, 'block', 'the outline box must be shown while hovering');
     assert.ok(
       Math.abs(hovered.boxW - hovered.targetW) <= 2,
@@ -1087,7 +1085,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.match(hovered.hint, /pick-target/, `hint should name the selector, got: ${hovered.hint}`);
 
     // Click it: the pick is taken, the overlay goes away, the target is stored.
-    const picked = await b.evaluate(`(() => {
+    const picked = await b.evaluate(run(() => {
       const el = document.querySelector('#pick-target');
       const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
       el.dispatchEvent(ev);
@@ -1095,11 +1093,11 @@ describe('recent-subreddits sidebar', { skip }, () => {
         prevented: ev.defaultPrevented,
         overlayGone: !document.getElementById('rs-picker-hint') && !document.getElementById('rs-picker-box'),
       };
-    })()`);
+    }));
     assert.equal(picked.prevented, true, 'the pick click must be swallowed, not passed to the page');
     assert.equal(picked.overlayGone, true, 'the picker overlay must be removed after a pick');
 
-    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings)));
     assert.deepEqual(
       stored.targets,
       [BUILTIN_HOOK, { selector: '#pick-target', mode: 'hook', events: 'both' }],
@@ -1108,12 +1106,12 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // The settings UI came back and lists it.
     assert.equal(
-      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      await b.evaluate(run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP)),
       true,
       'settings must reopen after a pick'
     );
     assert.equal(
-      await b.evaluate(`Array.from(document.querySelectorAll('.rs-target-sel')).map(c => c.textContent).at(-1)`),
+      await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-target-sel')).map(c => c.textContent).at(-1))),
       '#pick-target',
       'the target must be listed in settings'
     );
@@ -1123,28 +1121,28 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel open'
     );
 
-    await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
     await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
 
-    await b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    await b.evaluate(run(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))));
     await b.waitUntil(
       `!document.getElementById('rs-picker-hint')`,
       'picker overlay to be removed by Escape'
     );
 
     assert.deepEqual(
-      JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`)).targets,
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).targets,
       [BUILTIN_HOOK],
       'cancelling must not add a target'
     );
     assert.equal(
-      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      await b.evaluate(run((popupSel) => document.querySelector(popupSel).classList.contains('settings-open'), POPUP)),
       true,
       'settings must come back after cancelling'
     );
@@ -1154,7 +1152,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings panel open'
@@ -1162,22 +1160,22 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // Pick the same element twice.
     for (let i = 0; i < 2; i++) {
-      await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
+      await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
       await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, `picker active (${i})`);
-      await b.evaluate(`(() => {
+      await b.evaluate(run(() => {
         const el = document.querySelector('#pick-target');
         el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
         el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
         return true;
-      })()`);
+      }));
       await b.waitUntil(`!document.getElementById('rs-picker-hint')`, `picker closed (${i})`);
     }
 
-    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings)));
     // One seeded built-in hook + exactly one picked entry.
     assert.equal(stored.targets.length, 2, `duplicate pick must not add a second entry, got ${JSON.stringify(stored.targets)}`);
     assert.equal(
-      await b.evaluate(`document.querySelectorAll('.rs-target').length`),
+      await b.evaluate(run(() => document.querySelectorAll('.rs-target').length)),
       2,
       'the list must show the built-in hook plus the single picked row'
     );
@@ -1187,7 +1185,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
@@ -1195,14 +1193,14 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     // Read the selector the picker proposes for an element, without committing it.
     const propose = async (sel) => {
-      await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
+      await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
       await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
-      const text = await b.evaluate(`(() => {
-        const el = document.querySelector(${JSON.stringify(sel)});
+      const text = await b.evaluate(run((selArg) => {
+        const el = document.querySelector(selArg);
         el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
         return document.getElementById('rs-picker-hint').textContent;
-      })()`);
-      await b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+      }, sel));
+      await b.evaluate(run(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))));
       await b.waitUntil(`!document.getElementById('rs-picker-hint')`, 'picker closed');
       return text.replace(/\s+—.*$/, '').trim();
     };
@@ -1234,20 +1232,20 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     assert.equal(await b.evaluate(isVisible), false, 'popup starts hidden');
 
-    await b.evaluate(`(() => {
+    await b.evaluate(run(() => {
       const el = document.querySelector('#pick-target');
       const o = { bubbles: true, cancelable: true, relatedTarget: document.body };
       el.dispatchEvent(new MouseEvent('mouseover', o));
       return true;
-    })()`);
+    }));
     await b.waitUntil(isVisible, 'popup to open from the hooked element');
 
     // Anchored to the hooked element, not centred.
-    const geo = await b.evaluate(`(() => {
+    const geo = await b.evaluate(run((popupSel) => {
       const t = document.querySelector('#pick-target').getBoundingClientRect();
-      const p = document.querySelector('${POPUP}').getBoundingClientRect();
+      const p = document.querySelector(popupSel).getBoundingClientRect();
       return { triggerBottom: t.bottom, popupTop: p.top };
-    })()`);
+    }, POPUP));
     assert.ok(
       geo.popupTop >= geo.triggerBottom - 1 && geo.popupTop - geo.triggerBottom < 30,
       `popup should anchor below the hooked element, got ${JSON.stringify(geo)}`
@@ -1294,31 +1292,31 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
     );
 
     // Pick an element, then switch its mode.
-    await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
     await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
-    await b.evaluate(`(() => {
+    await b.evaluate(run(() => {
       const el = document.querySelector('#pick-target');
       el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
       el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       return true;
-    })()`);
+    }));
     await b.waitUntil(`!document.getElementById('rs-picker-hint')`, 'picker closed');
 
-    const changed = await b.evaluate(`(() => {
+    const changed = await b.evaluate(run(() => {
       // The last row is the one just picked; the seeded built-in hook is first.
       const sels = document.querySelectorAll('[data-role="mode"]');
       const sel = sels[sels.length - 1];
       sel.value = 'replace';
       sel.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
-    })()`);
+    }));
     assert.equal(changed, true);
 
     await b.waitUntil(
@@ -1329,11 +1327,11 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // A replace target has no event choice — the control is gone for that row,
     // while the built-in hook above it still has one.
     assert.equal(
-      await b.evaluate(`(() => {
+      await b.evaluate(run(() => {
         const rows = Array.from(document.querySelectorAll('.rs-target'));
         const last = rows[rows.length - 1];
         return last.querySelector('[data-role="events"]') === null;
-      })()`),
+      })),
       true,
       'the events selector must not be offered for a non-hook mode'
     );
@@ -1343,34 +1341,34 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
     );
 
-    await b.evaluate(`document.querySelector('[data-role="pick"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="pick"]').click()));
     await b.waitUntil(`!!document.getElementById('rs-picker-hint')`, 'picker active');
-    await b.evaluate(`(() => {
+    await b.evaluate(run(() => {
       const el = document.querySelector('#pick-target');
       el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
       el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       return true;
-    })()`);
+    }));
     await b.waitUntil(`document.querySelectorAll('.rs-target').length === 2`, 'target listed');
 
     // Remove the picked row (the last one); the built-in hook stays.
-    await b.evaluate(`(() => {
+    await b.evaluate(run(() => {
       const btns = document.querySelectorAll('[data-role="remove"]');
       btns[btns.length - 1].click();
       return true;
-    })()`);
+    }));
     await b.waitUntil(
       `JSON.parse(window.__store.recentSubredditsSettings).targets.length === 1`,
       'the removal to be persisted'
     );
     assert.equal(
-      await b.evaluate(`document.querySelectorAll('.rs-target').length`),
+      await b.evaluate(run(() => document.querySelectorAll('.rs-target').length)),
       1,
       'the row must disappear'
     );
@@ -1392,17 +1390,17 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // Two survive, each repaired to a valid mode/events.
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
     );
 
-    const rows = await b.evaluate(`Array.from(document.querySelectorAll('.rs-target')).map(li => ({
+    const rows = await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-target')).map(li => ({
       sel: li.querySelector('.rs-target-sel').textContent,
       mode: li.querySelector('[data-role="mode"]').value,
       events: li.querySelector('[data-role="events"]')?.value ?? null,
-    }))`);
+    }))));
     assert.deepEqual(
       rows,
       [
@@ -1412,7 +1410,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
       `malformed entries should be dropped and the rest repaired, got ${JSON.stringify(rows)}`
     );
 
-    assert.deepEqual(await b.evaluate(`window.__errors`), [], 'a bad store must not throw');
+    assert.deepEqual(await b.evaluate(run(() => window.__errors)), [], 'a bad store must not throw');
   });
 
   // ---- Inline modes (replace / prepend / append) ----
@@ -1425,7 +1423,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    const state = await b.evaluate(`(() => {
+    const state = await b.evaluate(run(() => {
       const el = document.querySelector('#pick-target');
       const host = document.querySelector('.rs-inline-host');
       return {
@@ -1440,7 +1438,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
         hasGear: !!host.querySelector('.rs-settings-btn'),
         hasClose: !!host.querySelector('.rs-close-btn'),
       };
-    })()`);
+    }));
 
     assert.equal(state.elVisibility, 'hidden', 'replace must hide the picked element');
     assert.equal(state.elStillInDom, true, 'replace must NOT remove the element from the DOM');
@@ -1459,13 +1457,13 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    const widths = await b.evaluate(`(() => {
+    const widths = await b.evaluate(run(() => {
       const el = document.querySelector('#pick-target');
       // Measure the element while it is still laid out (visibility, not display).
       const w = el.getBoundingClientRect().width;
       const inst = document.querySelector('.rs-inline');
       return { elW: Math.round(w), instW: Math.round(inst.getBoundingClientRect().width), css: inst.style.width };
-    })()`);
+    }));
     assert.equal(widths.css, `${widths.elW}px`, 'the block should adopt the element width');
     // The instance is wider by the padding (6px each side = 12px total).
     assert.ok(
@@ -1487,7 +1485,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    const geo = await b.evaluate(`(() => {
+    const geo = await b.evaluate(run(() => {
       const el = document.querySelector('#pick-target');
       const inst = document.querySelector('.rs-inline');
       const eb = el.getBoundingClientRect();
@@ -1504,7 +1502,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
         hitIsBlock: !!hit && (inst === hit || inst.contains(hit)),
         hitTag: hit ? hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') : null,
       };
-    })()`);
+    }));
 
     assert.ok(
       Math.abs(geo.dx) <= 2 && Math.abs(geo.dy) <= 2,
@@ -1530,22 +1528,22 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
     assert.equal(
-      await b.evaluate(`getComputedStyle(document.querySelector('#pick-target')).position`),
+      await b.evaluate(run(() => getComputedStyle(document.querySelector('#pick-target')).position)),
       'relative',
       'a static replace target must be promoted to a containing block'
     );
 
     // Drop the binding: the element goes back to how the page had it.
-    await b.evaluate(`document.querySelector('.rs-inline .rs-close-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-close-btn').click()));
     await b.waitUntil(`!document.querySelector('.rs-inline-host')`, 'the block to be removed');
 
     assert.equal(
-      await b.evaluate(`document.querySelector('#pick-target').style.position`),
+      await b.evaluate(run(() => document.querySelector('#pick-target').style.position)),
       '',
       'the promoted position must be reverted on teardown'
     );
     assert.equal(
-      await b.evaluate(`getComputedStyle(document.querySelector('#pick-target')).position`),
+      await b.evaluate(run(() => getComputedStyle(document.querySelector('#pick-target')).position)),
       'static',
       'the element must return to its original static position'
     );
@@ -1563,26 +1561,26 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
     assert.equal(
-      await b.evaluate(`document.querySelector('#positioned-target').style.position`),
+      await b.evaluate(run(() => document.querySelector('#positioned-target').style.position)),
       'relative',
       "the page's own positioning must be left exactly as it was"
     );
     // And the block still lands on it — no promotion was needed.
-    const geo = await b.evaluate(`(() => {
+    const geo = await b.evaluate(run(() => {
       const el = document.querySelector('#positioned-target').getBoundingClientRect();
       const inst = document.querySelector('.rs-inline').getBoundingClientRect();
       return { dx: Math.round(inst.left - el.left), dy: Math.round(inst.top - el.top) };
-    })()`);
+    }));
     assert.ok(
       Math.abs(geo.dx) <= 2 && Math.abs(geo.dy) <= 2,
       `the block must overlap an already-positioned element, got ${JSON.stringify(geo)}`
     );
 
     // Teardown must not clear a value it did not set.
-    await b.evaluate(`document.querySelector('.rs-inline .rs-close-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-close-btn').click()));
     await b.waitUntil(`!document.querySelector('.rs-inline-host')`, 'the block to be removed');
     assert.equal(
-      await b.evaluate(`document.querySelector('#positioned-target').style.position`),
+      await b.evaluate(run(() => document.querySelector('#positioned-target').style.position)),
       'relative',
       'teardown must not strip positioning the page set itself'
     );
@@ -1601,7 +1599,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    const state = await b.evaluate(`(() => {
+    const state = await b.evaluate(run(() => {
       const inner = document.querySelector('#override-inner');
       const block = document.querySelector('.rs-inline');
       const ib = block.getBoundingClientRect();
@@ -1619,7 +1617,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
         hitIsBlock: !!hit && (block === hit || block.contains(hit)),
         hitText: hit ? (hit.innerText || '').slice(0, 40) : null,
       };
-    })()`);
+    }));
 
     assert.equal(state.targetMarked, true, 'the target must carry the replace marker');
     assert.equal(
@@ -1648,17 +1646,17 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    await b.evaluate(`document.querySelector('.rs-inline .rs-close-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-close-btn').click()));
     await b.waitUntil(`!document.querySelector('.rs-inline-host')`, 'the block to be removed');
 
-    const after = await b.evaluate(`(() => {
+    const after = await b.evaluate(run(() => {
       const target = document.querySelector('#override-target');
       const inner = document.querySelector('#override-inner');
       return {
         marked: target.classList.contains('rs-replacing'),
         innerVisibility: getComputedStyle(inner).visibility,
       };
-    })()`);
+    }));
     assert.equal(after.marked, false, 'the marker must be removed on teardown');
     assert.equal(after.innerVisibility, 'visible', 'the original content must come back');
   });
@@ -1671,7 +1669,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    const state = await b.evaluate(`(() => {
+    const state = await b.evaluate(run(() => {
       const el = document.querySelector('#content');
       const host = document.querySelector('.rs-inline-host');
       return {
@@ -1679,7 +1677,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
         inside: el.contains(host),
         visibility: getComputedStyle(el).visibility,
       };
-    })()`);
+    }));
     assert.equal(state.firstChild, true, 'prepend must insert as the first child');
     assert.equal(state.inside, true, 'prepend must insert inside the element');
     assert.notEqual(state.visibility, 'hidden', 'prepend must not hide the element');
@@ -1693,7 +1691,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    const state = await b.evaluate(`(() => {
+    const state = await b.evaluate(run(() => {
       const el = document.querySelector('#content');
       const host = document.querySelector('.rs-inline-host');
       return {
@@ -1701,7 +1699,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
         inside: el.contains(host),
         visibility: getComputedStyle(el).visibility,
       };
-    })()`);
+    }));
     assert.equal(state.lastChild, true, 'append must insert as the last child');
     assert.equal(state.inside, true, 'append must insert inside the element');
     assert.notEqual(state.visibility, 'hidden', 'append must not hide the element');
@@ -1715,16 +1713,16 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    await b.evaluate(`document.querySelector('.rs-inline .rs-close-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-close-btn').click()));
     await b.waitUntil(`!document.querySelector('.rs-inline-host')`, 'the block to be removed');
 
     assert.deepEqual(
-      await b.evaluate(`JSON.parse(window.__store.recentSubredditsSettings).targets`),
+      await b.evaluate(run(() => JSON.parse(window.__store.recentSubredditsSettings).targets)),
       [],
       'the binding must be removed from settings'
     );
     assert.equal(
-      await b.evaluate(`getComputedStyle(document.querySelector('#pick-target')).visibility`),
+      await b.evaluate(run(() => getComputedStyle(document.querySelector('#pick-target')).visibility)),
       'visible',
       'the replaced element must be un-hidden when the binding is dropped'
     );
@@ -1738,13 +1736,13 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    await b.evaluate(`document.querySelector('.rs-inline .rs-pin-btn[data-name="javascript"]').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-pin-btn[data-name="javascript"]').click()));
     await b.waitUntil(
       `document.querySelectorAll('.rs-inline .rs-pinned .rs-link').length === 2`,
       'the inline list to show the new pin'
     );
 
-    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubreddits`));
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubreddits)));
     assert.deepEqual(stored.pinned, ['javascript', 'linux'], 'the pin must be persisted');
   });
 
@@ -1756,13 +1754,13 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
 
-    await b.evaluate(`document.querySelector('.rs-inline .rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('.rs-inline').classList.contains('settings-open')`,
       'the inline panel to open'
     );
 
-    const state = await b.evaluate(`(() => {
+    const state = await b.evaluate(run(() => {
       const inst = document.querySelector('.rs-inline');
       return {
         title: inst.querySelector('.rs-header').textContent,
@@ -1771,7 +1769,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
         // Opening the inline panel must NOT open the popup's.
         popupPanel: document.querySelector('.recent-subreddits-popup').classList.contains('settings-open'),
       };
-    })()`);
+    }));
     assert.equal(state.title, '⚙ Settings', 'the inline header must swap to the settings title');
     assert.equal(state.panelShown, 'block', 'the inline settings panel must be visible');
     assert.equal(state.listHidden, 'none', 'the inline list must be hidden while settings is open');
@@ -1788,7 +1786,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
     await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
     assert.equal(
-      await b.evaluate(`document.querySelector('#content').lastElementChild.classList.contains('rs-inline-host')`),
+      await b.evaluate(run(() => document.querySelector('#content').lastElementChild.classList.contains('rs-inline-host'))),
       true,
       'starts appended'
     );
@@ -1797,30 +1795,30 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // supplies its own targets, so the seeded built-in hook is not present.
     await b.evaluate(PRESS('Alt+Shift+r'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.recent-subreddits-popup .rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.recent-subreddits-popup .rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('.recent-subreddits-popup').classList.contains('settings-open')`,
       'popup settings open'
     );
 
-    await b.evaluate(`(() => {
+    await b.evaluate(run(() => {
       const sel = document.querySelector('.recent-subreddits-popup [data-role="mode"]');
       sel.value = 'prepend';
       sel.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
-    })()`);
+    }));
 
     await b.waitUntil(
       `document.querySelector('#content').firstElementChild?.classList.contains('rs-inline-host')`,
       'the block to move to the front after the mode change'
     );
     assert.equal(
-      await b.evaluate(`document.querySelectorAll('.rs-inline-host').length`),
+      await b.evaluate(run(() => document.querySelectorAll('.rs-inline-host').length)),
       1,
       'relocating must not duplicate the block'
     );
     assert.equal(
-      await b.evaluate(`getComputedStyle(document.querySelector('#content')).visibility`),
+      await b.evaluate(run(() => getComputedStyle(document.querySelector('#content')).visibility)),
       'visible',
       'switching between two inline modes must not hide the element'
     );
@@ -1836,11 +1834,11 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await new Promise((r) => setTimeout(r, 200));
 
     assert.equal(
-      await b.evaluate(`document.querySelectorAll('.rs-inline-host').length`),
+      await b.evaluate(run(() => document.querySelectorAll('.rs-inline-host').length)),
       0,
       'nothing should mount for an unmatched selector'
     );
-    assert.deepEqual(await b.evaluate(`window.__errors`), [], 'a missing element must not throw');
+    assert.deepEqual(await b.evaluate(run(() => window.__errors)), [], 'a missing element must not throw');
   });
 
   test('an invalid stored selector does not break the other targets', async () => {
@@ -1858,11 +1856,11 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await new Promise((r) => setTimeout(r, 200));
 
     assert.equal(
-      await b.evaluate(`document.querySelectorAll('.rs-inline-host').length`),
+      await b.evaluate(run(() => document.querySelectorAll('.rs-inline-host').length)),
       1,
       'the valid target must still mount despite the invalid sibling'
     );
-    assert.deepEqual(await b.evaluate(`window.__errors`), [], 'an invalid selector must not throw');
+    assert.deepEqual(await b.evaluate(run(() => window.__errors)), [], 'an invalid selector must not throw');
   });
 
   test('the built-in trigger ships as a settings target and reset restores it', async () => {
@@ -1872,38 +1870,38 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
     );
 
     // It is listed, with the full built-in selector.
-    const listed = await b.evaluate(`(() => {
+    const listed = await b.evaluate(run(() => {
       const sel = document.querySelector('.rs-target-sel');
       return { text: sel.textContent, title: sel.title };
-    })()`);
+    }));
     assert.match(listed.title, /top-nav-logo/, 'the built-in selector must be the listed target');
     assert.match(listed.title, /navbar-menu-button/, 'and must cover the whole combined selector');
 
     // Delete it, then confirm the list says the popup is hotkey-only.
-    await b.evaluate(`document.querySelector('[data-role="remove"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="remove"]').click()));
     await b.waitUntil(
       `JSON.parse(window.__store.recentSubredditsSettings).targets.length === 0`,
       'the built-in target to be removed'
     );
     assert.equal(
-      await b.evaluate(`document.querySelectorAll('.rs-target').length`),
+      await b.evaluate(run(() => document.querySelectorAll('.rs-target').length)),
       0,
       'removing it must leave no rows'
     );
     assert.match(
-      await b.evaluate(`document.querySelector('.rs-warn').textContent`),
+      await b.evaluate(run(() => document.querySelector('.rs-warn').textContent)),
       /Alt\+Shift\+R/,
       'with no hook, settings must point at the hotkey'
     );
     // Hover must genuinely stop opening the popup.
-    await b.evaluate(`document.querySelector('[data-role="done"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="done"]').click()));
     await b.evaluate(CLICK_BODY);
     await b.waitUntil(`!${isVisible}`, 'popup closed');
     await b.evaluate(HOVER('#logo'));
@@ -1913,29 +1911,29 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // Reset restores it — a restore, not a wipe.
     await b.evaluate(PRESS('Alt+Shift+r'));
     await b.waitUntil(isVisible, 'popup reopened by hotkey');
-    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.evaluate(run(() => document.querySelector('.rs-settings-btn').click()));
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open again'
     );
-    await b.evaluate(`document.querySelector('[data-role="reset"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="reset"]').click()));
     await b.waitUntil(
       `JSON.parse(window.__store.recentSubredditsSettings).targets.length === 1`,
       'reset to restore a target'
     );
     assert.equal(
-      await b.evaluate(`document.querySelectorAll('.rs-target').length`),
+      await b.evaluate(run(() => document.querySelectorAll('.rs-target').length)),
       1,
       'reset must restore the built-in trigger row'
     );
     assert.equal(
-      await b.evaluate(`!!document.querySelector('.rs-warn')`),
+      await b.evaluate(run(() => !!document.querySelector('.rs-warn'))),
       false,
       'the hotkey-only warning must be gone once a hook is restored'
     );
 
     // And hover works again.
-    await b.evaluate(`document.querySelector('[data-role="done"]').click()`);
+    await b.evaluate(run(() => document.querySelector('[data-role="done"]').click()));
     await b.evaluate(CLICK_BODY);
     await b.waitUntil(`!${isVisible}`, 'popup closed');
     await b.evaluate(HOVER('#logo'));
@@ -1955,11 +1953,11 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.match(warns[0], /recent-subreddits/, 'warning should be prefixed so it is identifiable');
 
     // Navigating must not spam the console with a repeat.
-    await b.evaluate(`document.body.appendChild(document.createElement('span'))`);
+    await b.evaluate(run(() => document.body.appendChild(document.createElement('span'))));
     await b.evaluate(CLICK_BODY);
     await new Promise((r) => setTimeout(r, 300));
     assert.equal(
-      await b.evaluate(`window.__warns.length`),
+      await b.evaluate(run(() => window.__warns.length)),
       1,
       'the warning must not repeat'
     );
@@ -1969,7 +1967,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await open();
     await new Promise((r) => setTimeout(r, 300));
     assert.deepEqual(
-      await b.evaluate(`window.__warns`),
+      await b.evaluate(run(() => window.__warns)),
       [],
       'a normal page must stay silent in the console'
     );

@@ -23,11 +23,30 @@ export default [
     },
   },
   {
-    files: ['scripts/**/*.mjs', 'tests/**/*.mjs'],
+    files: ['scripts/**/*.mjs'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
-      globals: { ...globals.node, document: 'readonly' },
+      globals: { ...globals.node },
+    },
+  },
+  {
+    // The e2e tests carry `run(() => ...)` bodies that execute in the page, so
+    // both the test process's node globals and the page's browser globals are
+    // legitimately in scope here.
+    files: ['tests/e2e/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
+  {
+    files: ['tests/unit/**/*.mjs', 'tests/manual/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { ...globals.node },
     },
   },
 ];

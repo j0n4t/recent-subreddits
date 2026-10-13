@@ -316,7 +316,10 @@ export class Browser {
     });
     if (res.exceptionDetails) {
       const desc = res.exceptionDetails.exception?.description || res.exceptionDetails.text;
-      throw new Error(`page JS threw: ${desc}\n--- expression ---\n${expression}`);
+      // Show the code that ran: for run() that is the function source, not the
+      // opaque {__run, __args} wrapper, which would print as [object Object].
+      const shown = expr === expression ? expression : `${expression.__run}   // args: ${JSON.stringify(expression.__args)}`;
+      throw new Error(`page JS threw: ${desc}\n--- expression ---\n${shown}`);
     }
     return res.result.value;
   }
