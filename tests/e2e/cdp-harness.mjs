@@ -108,6 +108,12 @@ export function findBrowser() {
  *     const el = document.querySelector(sel);
  *     return el ? el.getBoundingClientRect().width : null;
  *   }, '#pick-target'));
+ *
+ * The body runs in the PAGE, not here, so it can only reach page globals
+ * (document, window, MouseEvent, ...) and its own arguments. A test-file
+ * constant referenced by closure — POPUP, say — is not in scope there: pass it
+ * as an argument instead. The function is stringified, so a closure capture
+ * would otherwise be an undefined reference at run time, not at load time.
  */
 export function run(fn, ...args) {
   return { __run: fn.toString(), __args: args };
