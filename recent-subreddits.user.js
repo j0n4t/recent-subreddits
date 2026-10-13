@@ -122,7 +122,10 @@
   var DEFAULT_SETTINGS = {
     hotkey: "Alt+Shift+R",
     targets: [BUILTIN_HOOK],
-    blocked: []
+    blocked: [],
+    // Opt-in: a tidy list by default, with each row's pin/trash (and the panel's
+    // close button) appearing only while its row is hovered.
+    hideRowControls: false
   };
   function defaultSettings() {
     return {
@@ -174,7 +177,10 @@
       return {
         hotkey: typeof parsed.hotkey === "string" && parsed.hotkey.trim() ? parsed.hotkey.trim() : DEFAULT_SETTINGS.hotkey,
         targets: normalizeTargets(parsed.targets),
-        blocked: normalizeBlocked(parsed.blocked)
+        blocked: normalizeBlocked(parsed.blocked),
+        // Strict boolean: anything else (a hand-edited "true" string, a null)
+        // falls back to the default rather than becoming truthy by accident.
+        hideRowControls: parsed.hideRowControls === true
       };
     } catch {
       return defaultSettings();
@@ -369,6 +375,20 @@
       margin-top: 4px;
       line-height: 1.4;
     }
+    /* A checkbox setting reads as one row: box, then label. */
+    .rs-check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--rs-text);
+      cursor: pointer;
+    }
+    .rs-checkbox {
+      margin: 0;
+      cursor: pointer;
+      accent-color: var(--rs-accent);
+    }
     .rs-status {
       font-size: 11px;
       min-height: 14px;
@@ -561,6 +581,34 @@
       transition: color 0.15s;
     }
     .rs-remove-btn:hover { color: var(--rs-error); }
+    /* ---- Opt-in: controls appear on row hover ---- */
+    /* "Hide row controls" in settings puts .rs-hide-controls on the instance.
+       The controls keep their place in the row (no reflow on hover) and only
+       their visibility changes. Scoped to the instance class rather than the
+       controls themselves, so the default look is untouched. */
+    .rs-hide-controls .rs-pin-btn,
+    .rs-hide-controls .rs-unpin-btn,
+    .rs-hide-controls .rs-remove-btn {
+      opacity: 0;
+    }
+    .rs-hide-controls .rs-item:hover .rs-pin-btn,
+    .rs-hide-controls .rs-item:hover .rs-unpin-btn,
+    .rs-hide-controls .rs-item:hover .rs-remove-btn,
+    .rs-hide-controls .rs-pin-btn:focus-visible,
+    .rs-hide-controls .rs-unpin-btn:focus-visible,
+    .rs-hide-controls .rs-remove-btn:focus-visible {
+      opacity: 1;
+    }
+    /* The main close button follows the same rule, revealed by hovering the
+       header row it sits in. */
+    .rs-hide-controls .rs-close-btn {
+      opacity: 0;
+      transition: color 0.15s, opacity 0.15s;
+    }
+    .rs-hide-controls .rs-header-row:hover .rs-close-btn,
+    .rs-hide-controls .rs-close-btn:focus-visible {
+      opacity: 1;
+    }
     .rs-empty {
       color: var(--rs-text-muted);
       font-style: italic;
@@ -1194,6 +1242,16 @@
         line to let it back into the list.</div>
     </div>
 
+    <div class="rs-field">
+      <label class="rs-check">
+        <input type="checkbox" class="rs-checkbox" data-role="hide-controls"
+               ${settings.hideRowControls ? "checked" : ""} />
+        <span>Hide row controls until hover</span>
+      </label>
+      <div class="rs-hint">Hides each row's \u{1F4CC} and \u{1F5D1}, and the \u2715 in the header,
+        until you hover the row they belong to. Keeps the list uncluttered.</div>
+    </div>
+
     <div class="rs-status"></div>
     <div class="rs-actions">
       <button class="rs-btn" data-role="reset">Reset to default</button>
@@ -1298,11 +1356,19 @@
       ctl2.refreshList();
       say(unique.length ? `Saved ${unique.length} blocked subreddit(s).` : "Blocklist cleared.");
     });
+    panel.querySelector('[data-role="hide-controls"]').addEventListener("change", (e) => {
+      e.stopPropagation();
+      const on = e.target.checked;
+      saveSettings({ ...loadSettings(), hideRowControls: on });
+      ctl2.applyControlVisibility();
+      say(on ? "Row controls will show on hover." : "Row controls are always shown.");
+    });
     panel.querySelector('[data-role="reset"]').addEventListener("click", (e) => {
       e.stopPropagation();
       saveSettings(defaultSettings());
       ctl2.setActiveHotkey(parseHotkey(DEFAULT_SETTINGS.hotkey));
       ctl2.applyTargets();
+      ctl2.applyControlVisibility();
       ctl2.rerender(host);
       say(`Reset \u2014 ${DEFAULT_SETTINGS.hotkey}, and the built-in trigger restored.`);
     });
@@ -1524,6 +1590,7 @@
     togglePopup,
     applyTargets,
     refreshList,
+    applyControlVisibility,
     // A setter, not a function reference: the panel replaces the active combo.
     setActiveHotkey: (combo) => {
       activeHotkey = combo;
@@ -1545,10 +1612,17 @@
   function refreshList() {
     refreshAll(loadData());
   }
+  function applyControlVisibility() {
+    const hide = loadSettings().hideRowControls;
+    for (const el of document.querySelectorAll(".rs-instance")) {
+      el.classList.toggle("rs-hide-controls", hide);
+    }
+  }
   function buildPopupShell() {
     const popup = document.createElement("div");
     popup.className = "recent-subreddits-popup rs-instance";
     popup.id = "rs-popup";
+    if (loadSettings().hideRowControls) popup.classList.add("rs-hide-controls");
     const close = document.createElement("button");
     close.className = "rs-close-btn";
     close.id = "rs-close";
@@ -1638,6 +1712,7 @@
       harvestIcon();
       renderContent2(loadData());
       applyTargets();
+      applyControlVisibility();
     } else {
       ensureMounted();
       applyTargets();

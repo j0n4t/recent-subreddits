@@ -107,6 +107,16 @@ export function renderSettingsPanel(instance, ctl) {
         line to let it back into the list.</div>
     </div>
 
+    <div class="rs-field">
+      <label class="rs-check">
+        <input type="checkbox" class="rs-checkbox" data-role="hide-controls"
+               ${settings.hideRowControls ? 'checked' : ''} />
+        <span>Hide row controls until hover</span>
+      </label>
+      <div class="rs-hint">Hides each row's 📌 and 🗑, and the ✕ in the header,
+        until you hover the row they belong to. Keeps the list uncluttered.</div>
+    </div>
+
     <div class="rs-status"></div>
     <div class="rs-actions">
       <button class="rs-btn" data-role="reset">Reset to default</button>
@@ -264,6 +274,17 @@ export function renderSettingsPanel(instance, ctl) {
     say(unique.length ? `Saved ${unique.length} blocked subreddit(s).` : 'Blocklist cleared.');
   });
 
+  // ---- Hide row controls ----
+  // Applied to every mounted instance immediately, so the effect is visible in
+  // the list behind the panel rather than only after reopening it.
+  panel.querySelector('[data-role="hide-controls"]').addEventListener('change', (e) => {
+    e.stopPropagation();
+    const on = e.target.checked;
+    saveSettings({ ...loadSettings(), hideRowControls: on });
+    ctl.applyControlVisibility();
+    say(on ? 'Row controls will show on hover.' : 'Row controls are always shown.');
+  });
+
   panel.querySelector('[data-role="reset"]').addEventListener('click', (e) => {
     e.stopPropagation();
     // defaultSettings() carries the built-in popup trigger, so resetting puts
@@ -272,6 +293,7 @@ export function renderSettingsPanel(instance, ctl) {
     ctl.setActiveHotkey(parseHotkey(DEFAULT_SETTINGS.hotkey));
     // The target list changed, so inline blocks must be reconciled too.
     ctl.applyTargets();
+    ctl.applyControlVisibility();
     ctl.rerender(host);
     say(`Reset — ${DEFAULT_SETTINGS.hotkey}, and the built-in trigger restored.`);
   });

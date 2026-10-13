@@ -83,6 +83,9 @@ export const DEFAULT_SETTINGS = {
   hotkey: 'Alt+Shift+R',
   targets: [BUILTIN_HOOK],
   blocked: [],
+  // Opt-in: a tidy list by default, with each row's pin/trash (and the panel's
+  // close button) appearing only while its row is hovered.
+  hideRowControls: false,
 };
 
 /**
@@ -165,6 +168,9 @@ export function loadSettings() {
           : DEFAULT_SETTINGS.hotkey,
       targets: normalizeTargets(parsed.targets),
       blocked: normalizeBlocked(parsed.blocked),
+      // Strict boolean: anything else (a hand-edited "true" string, a null)
+      // falls back to the default rather than becoming truthy by accident.
+      hideRowControls: parsed.hideRowControls === true,
     };
   } catch {
     return defaultSettings();

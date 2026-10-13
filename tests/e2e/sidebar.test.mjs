@@ -939,6 +939,167 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.equal(await b.evaluate(isVisible), true, 'back must not close the popup itself');
   });
 
+  // ---- Hide row controls (opt-in) ----
+
+  /**
+   * Move the real pointer. The only thing that can drive CSS `:hover` — a
+   * synthetic MouseEvent fires handlers on the node regardless of where the
+   * cursor is, so it would pass while the control is unreachable.
+   */
+  async function movePointer(x, y) {
+    await b.session('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 });
+  }
+
+  /** Centre of the first element matching `sel`, in viewport coordinates. */
+  async function centreOf(sel) {
+    return b.evaluate(run((s) => {
+      const el = document.querySelector(s);
+      if (!el) throw new Error('no element for ' + s);
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) };
+    }, sel));
+  }
+
+  /** Computed opacity of the row controls and the header close button. */
+  const OPACITIES = run((popupSel) => {
+    const q = (s) => document.querySelector(popupSel + ' ' + s);
+    const op = (el) => (el ? getComputedStyle(el).opacity : null);
+    return {
+      hasClass: document.querySelector(popupSel).classList.contains('rs-hide-controls'),
+      pin: op(q('.rs-pin-btn')),
+      trash: op(q('.rs-remove-btn')),
+      close: op(q('.rs-close-btn')),
+    };
+  }, POPUP);
+
+  /**
+   * Wait for one control's opacity to settle at `want`.
+   *
+   * Polling, not a bare read: the controls transition their opacity over 0.15s,
+   * so a single read right after the pointer moves samples a value part-way
+   * through and reads as "the hover did nothing".
+   */
+  function opacityIs(which, want) {
+    return run((args) => {
+      const [popupSel, w, expected] = args;
+      const el = document.querySelector(popupSel + ' ' + w);
+      return el ? getComputedStyle(el).opacity === expected : false;
+    }, [POPUP, which, want]);
+  }
+
+  test('hide row controls: OFF by default, so every control is visible without hovering', async () => {
+    await open();
+    await openPopup();
+
+    const before = await b.evaluate(OPACITIES);
+    assert.equal(before.hasClass, false, 'the opt-in must not be on by default');
+    for (const [name, value] of Object.entries(before)) {
+      if (name === 'hasClass') continue;
+      assert.notEqual(value, '0', `${name} must be visible without hovering when the option is off`);
+    }
+  });
+
+  test('hide row controls: ON hides the pin, trash and close until their row is hovered', async () => {
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&settings=${settingsParam({ hideRowControls: true })}`);
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+
+    // Hidden while the pointer is away.
+    assert.equal((await b.evaluate(OPACITIES)).pin, '0', 'the pin must be hidden before hovering');
+    assert.equal((await b.evaluate(OPACITIES)).trash, '0', 'the trash must be hidden before hovering');
+    assert.equal((await b.evaluate(OPACITIES)).close, '0', 'the close button must be hidden before hovering');
+
+    // Hover the row itself — not the button — which is what reveals it.
+    const row = await centreOf('.rs-section:not(.rs-pinned-section) .rs-item');
+    assert.ok(row.w > 0 && row.h > 0, `the row must have a real box, got ${JSON.stringify(row)}`);
+    await movePointer(row.x, row.y);
+
+    await b.waitUntil(opacityIs('.rs-pin-btn', '1'), 'hovering the row to reveal the pin');
+    await b.waitUntil(opacityIs('.rs-remove-btn', '1'), 'hovering the row to reveal the trash');
+    assert.equal(
+      (await b.evaluate(OPACITIES)).close,
+      '0',
+      'the close button belongs to the header, not the row'
+    );
+
+    // Revealed means reachable: the pointer is genuinely over the control.
+    const pin = await centreOf('.rs-pin-btn');
+    const hit = await b.evaluate(run((p) => {
+      const el = document.elementFromPoint(p.x, p.y);
+      return el ? (el.closest('.rs-pin-btn') ? 'pin' : el.tagName.toLowerCase()) : null;
+    }, pin));
+    assert.equal(hit, 'pin', 'the revealed pin must be what the pointer hits');
+
+    // And the header's own hover reveals the close button.
+    const header = await centreOf('.rs-header-row');
+    await movePointer(header.x, header.y);
+    await b.waitUntil(opacityIs('.rs-close-btn', '1'), 'hovering the header row to reveal the close button');
+  });
+
+  test('hide row controls: the settings checkbox persists the choice', async () => {
+    await open();
+    await openSettings('settings panel open');
+
+    // The control starts unchecked, matching the default.
+    assert.equal(
+      await b.evaluate(run(() => document.querySelector('[data-role="hide-controls"]').checked)),
+      false,
+      'the checkbox must reflect the default'
+    );
+
+    await b.evaluate(run(() => {
+      const cb = document.querySelector('[data-role="hide-controls"]');
+      cb.checked = true;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }));
+
+    assert.equal(
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).hideRowControls,
+      true,
+      'the choice must be persisted'
+    );
+    // Applied to the live instance, not only on the next mount.
+    assert.equal(
+      await b.evaluate(run((popupSel) => document.querySelector(popupSel).classList.contains('rs-hide-controls'), POPUP)),
+      true,
+      'the instance must pick the class up immediately'
+    );
+
+    // Reset puts it back off — it is a restore, not a wipe.
+    await b.evaluate(run(() => document.querySelector('[data-role="reset"]').click()));
+    assert.equal(
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).hideRowControls,
+      false,
+      'reset must clear it'
+    );
+    assert.equal(
+      await b.evaluate(run((popupSel) => document.querySelector(popupSel).classList.contains('rs-hide-controls'), POPUP)),
+      false,
+      'and the class must come back off'
+    );
+  });
+
+  test('hide row controls: an inline block honours it too', async () => {
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ hideRowControls: true, targets: [{ selector: '#pick-target', mode: 'append' }] })
+    );
+    await b.waitUntil(run(() => !!document.querySelector('.rs-inline')), 'inline block to mount');
+
+    assert.equal(
+      await b.evaluate(run(() => document.querySelector('.rs-inline').classList.contains('rs-hide-controls'))),
+      true,
+      'the inline block must carry the class, not just the popup'
+    );
+    assert.equal(
+      await b.evaluate(run(() => getComputedStyle(document.querySelector('.rs-inline .rs-pin-btn')).opacity)),
+      '0',
+      'and its controls must start hidden'
+    );
+  });
+
   test('close button sits at the end of the header row, aligned with the popup edge', async () => {
     await open();
     await openPopup();

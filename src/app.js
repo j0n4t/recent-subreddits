@@ -40,6 +40,7 @@ const panelCtl = {
   togglePopup,
   applyTargets,
   refreshList,
+  applyControlVisibility,
   // A setter, not a function reference: the panel replaces the active combo.
   setActiveHotkey: (combo) => { activeHotkey = combo; },
 };
@@ -74,6 +75,20 @@ function refreshList() {
 }
 
 /**
+ * Whether row controls are revealed on hover instead of always shown.
+ *
+ * The class goes on the instance, and the CSS keys off it, so the default
+ * (off) needs no rules at all. Applied to every mounted instance — the popup
+ * and each inline block — because the setting is global.
+ */
+function applyControlVisibility() {
+  const hide = loadSettings().hideRowControls;
+  for (const el of document.querySelectorAll('.rs-instance')) {
+    el.classList.toggle('rs-hide-controls', hide);
+  }
+}
+
+/**
  * Build the popup's static shell ONCE. Its inner structure never changes, so
  * the node itself survives every content re-render — which is what lets the
  * settings modal stay open while pins change underneath it.
@@ -82,6 +97,9 @@ function buildPopupShell() {
   const popup = document.createElement('div');
   popup.className = 'recent-subreddits-popup rs-instance';
   popup.id = 'rs-popup';
+  // Inline instances are built from this same shell, so the setting lands on
+  // them too without a second call site.
+  if (loadSettings().hideRowControls) popup.classList.add('rs-hide-controls');
 
   const close = document.createElement('button');
   close.className = 'rs-close-btn';
@@ -226,6 +244,8 @@ function mountSidebar() {
     renderContent(loadData());
     // Mount any configured inline blocks on this page.
     applyTargets();
+    // The stored preference is applied to every instance as it mounts.
+    applyControlVisibility();
   } else {
     ensureMounted();
     applyTargets();

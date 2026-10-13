@@ -333,6 +333,27 @@ describe('the built-in trigger as a default setting', () => {
     assert.deepEqual(s.targets, [], 'an explicitly emptied list must not be re-seeded');
   });
 
+  test('hideRowControls is opt-in, and a malformed value falls back to off', () => {
+    // Off by default: the list must not change appearance for anyone who has
+    // not asked for it.
+    assert.equal(DEFAULT_SETTINGS.hideRowControls, false, 'the option must default to off');
+    assert.equal(defaultSettings().hideRowControls, false, 'and reset must restore off');
+
+    const cases = [
+      ['absent', { hotkey: 'Alt+Shift+R', targets: [] }],
+      ['a string "true"', { hotkey: 'Alt+Shift+R', targets: [], hideRowControls: 'true' }],
+      ['null', { hotkey: 'Alt+Shift+R', targets: [], hideRowControls: null }],
+    ];
+    for (const [label, stored] of cases) {
+      const store = { recentSubredditsSettings: JSON.stringify(stored) };
+      const s = withStore(store, () => loadSettings());
+      assert.equal(s.hideRowControls, false, `${label} must resolve to off`);
+    }
+
+    const on = { recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], hideRowControls: true }) };
+    assert.equal(withStore(on, () => loadSettings()).hideRowControls, true, 'an explicit true must be kept');
+  });
+
   test('defaultSettings() returns a fresh copy, never the shared object', () => {
     // The reset button writes it and the list mutates targets; sharing the
     // module-level array would let one leak into the other.
