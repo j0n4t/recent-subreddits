@@ -301,43 +301,132 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.deepEqual(blocked, ['webdev'], 'the removal must blacklist the subreddit');
   });
 
-  test('blacklist: settings lists blocked subreddits and can restore one', async () => {
-    await open();
+  test('blacklist: settings shows the blocklist as a textarea, one name per line', async () => {
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&blocked=webdev,rust`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
+
     await b.evaluate(HOVER('#logo'));
     await b.waitUntil(isVisible, 'popup open');
-    await b.evaluate(`document.querySelector('.rs-remove-btn[data-name="rust"]').click()`);
-    await b.waitUntil(
-      `!document.querySelector('.rs-remove-btn[data-name="rust"]')`,
-      'r/rust to be removed'
-    );
-
-    // The settings panel shows the blacklist.
     await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
     await b.waitUntil(
       `document.querySelector('${POPUP}').classList.contains('settings-open')`,
       'settings open'
     );
-    assert.deepEqual(
-      await b.evaluate(`Array.from(document.querySelectorAll('.rs-blocked-list .rs-target-sel')).map(c => c.textContent)`),
-      ['r/rust'],
-      'the blocked subreddit must be listed in settings'
+
+    const state = await b.evaluate(`(() => {
+      const ta = document.querySelector('.rs-blocked-input');
+      const cs = getComputedStyle(ta);
+      return {
+        tag: ta.tagName,
+        value: ta.value,
+        lines: ta.value.split('\\n'),
+        // Must be a real multi-line field, not a text input.
+        rows: ta.rows,
+        height: Math.round(ta.getBoundingClientRect().height),
+        resizable: cs.resize,
+        // The old per-row list must be gone.
+        oldList: !!document.querySelector('.rs-blocked-list'),
+      };
+    })()`);
+
+    assert.equal(state.tag, 'TEXTAREA', 'the blocklist must be a textarea');
+    assert.deepEqual(state.lines, ['webdev', 'rust'], 'one subreddit per line, in order');
+    assert.equal(state.oldList, false, 'the old per-row list must be gone');
+    assert.ok(state.height > 40, `a textarea must be multi-line, got ${state.height}px`);
+    assert.equal(state.resizable, 'vertical', 'it should be user-resizable');
+  });
+
+  test('blacklist: editing the textarea saves the blocklist and re-enables tracking', async () => {
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&blocked=webdev,rust`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
+
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open'
     );
 
-    // Restoring removes it from the blacklist and from the settings list.
-    await b.evaluate(`document.querySelector('.rs-blocked-list [data-role="unblock"]').click()`);
-    await b.waitUntil(
-      `document.querySelectorAll('.rs-blocked-list [data-role="unblock"]').length === 0`,
-      'the blocked row to disappear'
+    // Delete r/rust's line and add two more — the real edit path: type, then
+    // blur (which is what fires `change`).
+    await b.evaluate(`(() => {
+      const ta = document.querySelector('.rs-blocked-input');
+      ta.value = 'webdev\\n  Linux  \\nr/webdev\\n';
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+
+    const stored = JSON.parse(
+      await b.evaluate(`window.__store.recentSubredditsSettings`)
+    ).blocked;
+    // Normalized: trimmed, lowercased, r/ prefix stripped, duplicates dropped,
+    // blank lines ignored.
+    assert.deepEqual(stored, ['webdev', 'linux'], `blocklist must be normalized, got ${JSON.stringify(stored)}`);
+
+    // The field itself keeps what was typed (not re-rendered underneath the user).
+    assert.equal(
+      await b.evaluate(`document.querySelector('.rs-blocked-input').value`),
+      'webdev\n  Linux  \nr/webdev\n',
+      'the textarea must not be rewritten while the user is editing'
     );
+  });
+
+  test('blacklist: clearing the textarea clears the blocklist', async () => {
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&blocked=webdev`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
+
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open'
+    );
+
+    await b.evaluate(`(() => {
+      const ta = document.querySelector('.rs-blocked-input');
+      ta.value = '';
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+
     assert.deepEqual(
       JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`)).blocked,
       [],
-      'restoring must clear the blacklist entry'
+      'an empty textarea must clear the blocklist'
     );
+  });
+
+  test('blacklist: typing in the textarea does not fire the global hotkey', async () => {
+    // The panel's field must swallow its keys: the hotkey handler is on
+    // `document`, and a bare letter typed here must not be read as a shortcut.
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&blocked=webdev`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
+
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open'
+    );
+
+    // The default hotkey is Alt+Shift+R; press it inside the field.
+    await b.evaluate(`(() => {
+      const ta = document.querySelector('.rs-blocked-input');
+      ta.focus();
+      ta.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'r', altKey: true, shiftKey: true, bubbles: true, cancelable: true,
+      }));
+      return true;
+    })()`);
+
+    assert.equal(await b.evaluate(isVisible), true, 'the popup must not toggle from a key in the field');
     assert.equal(
-      await b.evaluate(`document.querySelector('.rs-blocked-list .rs-empty').textContent`),
-      'Nothing blocked.',
-      'the empty state must show'
+      await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
+      true,
+      'settings must stay open'
     );
   });
 

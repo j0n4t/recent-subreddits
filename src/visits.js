@@ -4,7 +4,6 @@
 // instance afterwards, which is why they take a `refresh` callback rather than
 // importing the render layer themselves.
 import { loadData, saveData, loadSettings, saveSettings, MAX_RECENT } from './storage.js';
-
 export function getSubredditFromUrl() {
   const path = window.location.pathname;
   // Matches /r/subreddit/... or /r/subreddit
@@ -85,14 +84,4 @@ export function removeVisit(name, refresh) {
   }
 
   refresh(data);
-}
-
-/** Un-blacklist a subreddit so it can be tracked again, then refresh. */
-export function unblock(name, refresh) {
-  const key = String(name).toLowerCase();
-  const s = loadSettings();
-  const next = s.blocked.filter((b) => b !== key);
-  if (next.length === s.blocked.length) return;
-  saveSettings({ ...s, blocked: next });
-  refresh(loadData());
 }

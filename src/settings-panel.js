@@ -67,22 +67,8 @@ export function renderSettingsPanel(instance, ctl) {
       .join('')
     : '<li class="rs-empty">No page targets yet.</li>';
 
-  // The blacklist: subreddits the user removed from history. Restoring one
-  // deletes it from this list, which is what allows it to be tracked again.
-  const blockedRows = settings.blocked.length
-    ? settings.blocked
-      .map(
-        (name, i) => `
-            <li class="rs-target">
-              <code class="rs-target-sel" title="${escAttr(name)}">r/${escAttr(name)}</code>
-              <div class="rs-target-controls">
-                <span class="rs-muted">Blocked</span>
-                <button class="rs-icon-btn" data-role="unblock" data-index="${i}" title="Restore">✕</button>
-              </div>
-            </li>`
-      )
-      .join('')
-    : '<li class="rs-empty">Nothing blocked.</li>';
+  // The blacklist is a plain textarea of names (see the markup below), so there
+  // are no rows to build here.
 
   panel.innerHTML = `
     <div class="rs-field">
@@ -106,9 +92,11 @@ export function renderSettingsPanel(instance, ctl) {
 
     <div class="rs-field">
       <label class="rs-label">Blocked subreddits</label>
-      <div class="rs-hint">Removed from history with the 🗑 button. They are not
-        tracked again until you restore them here.</div>
-      <ul class="rs-targets rs-blocked-list">${blockedRows}</ul>
+      <textarea class="rs-input rs-blocked-input" rows="4" spellcheck="false"
+                placeholder="one subreddit per line">${escAttr(settings.blocked.join('\n'))}</textarea>
+      <div class="rs-hint">One subreddit per line, without the r/ — the 🗑 button
+        adds them here. A blocked subreddit is not tracked again, so delete its
+        line to let it back into the list.</div>
     </div>
 
     <div class="rs-status"></div>
@@ -232,18 +220,32 @@ export function renderSettingsPanel(instance, ctl) {
     say('Target updated.');
   });
 
-  panel.querySelector('.rs-blocked-list').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-role="unblock"]');
-    if (!btn) return;
+  // ---- Blocked subreddits ----
+  // One textarea, one name per line. Saving on `change` (blur / Enter) rather
+  // than per keystroke keeps the blacklist from thrashing while a line is being
+  // typed, and keydown is stopped from propagating so the popup's global hotkey
+  // handler never sees a bare letter typed in here.
+  const blockedInput = panel.querySelector('.rs-blocked-input');
+
+  blockedInput.addEventListener('keydown', (e) => {
+    // Enter inserts a newline, which is what we want here; just do not let the
+    // key reach the document-level hotkey handler.
     e.stopPropagation();
+  });
+
+  blockedInput.addEventListener('change', () => {
+    const names = blockedInput.value
+      .split('\n')
+      .map((line) => line.trim().replace(/^\/?r\//i, '').toLowerCase())
+      .filter(Boolean);
+    const unique = [...new Set(names)];
+
     const s = loadSettings();
-    const name = s.blocked[Number(btn.dataset.index)];
-    if (!name) return;
-    // Restoring re-renders this panel and repaints the list, so the row leaves
-    // both places at once.
-    ctl.unblock(name);
-    ctl.rerender(host);
-    say(`r/${name} restored — it will be tracked again.`);
+    saveSettings({ ...s, blocked: unique });
+    // A name may have been deleted, which lets it be tracked again — repaint the
+    // list so it is not left stale.
+    ctl.refreshList();
+    say(unique.length ? `Saved ${unique.length} blocked subreddit(s).` : 'Blocklist cleared.');
   });
 
   panel.querySelector('[data-role="reset"]').addEventListener('click', (e) => {

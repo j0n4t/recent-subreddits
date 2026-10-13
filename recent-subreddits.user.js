@@ -331,6 +331,15 @@
       border-color: var(--rs-accent);
       box-shadow: 0 0 0 2px var(--rs-accent-soft);
     }
+    /* The blocklist is one name per line, so it needs a textarea rather than the
+       single-line input the other fields use. */
+    .rs-blocked-input {
+      display: block;
+      resize: vertical;
+      min-height: 56px;
+      font-family: monospace;
+      line-height: 1.5;
+    }
     .rs-hint {
       font-size: 11px;
       color: var(--rs-text-muted);
@@ -686,14 +695,6 @@
       saveSettings(s);
     }
     refresh(data);
-  }
-  function unblock(name, refresh) {
-    const key = String(name).toLowerCase();
-    const s = loadSettings();
-    const next = s.blocked.filter((b) => b !== key);
-    if (next.length === s.blocked.length) return;
-    saveSettings({ ...s, blocked: next });
-    refresh(loadData());
   }
 
   // src/icons.js
@@ -1126,16 +1127,6 @@
               </div>
             </li>`;
     }).join("") : '<li class="rs-empty">No page targets yet.</li>';
-    const blockedRows = settings.blocked.length ? settings.blocked.map(
-      (name, i) => `
-            <li class="rs-target">
-              <code class="rs-target-sel" title="${escAttr(name)}">r/${escAttr(name)}</code>
-              <div class="rs-target-controls">
-                <span class="rs-muted">Blocked</span>
-                <button class="rs-icon-btn" data-role="unblock" data-index="${i}" title="Restore">\u2715</button>
-              </div>
-            </li>`
-    ).join("") : '<li class="rs-empty">Nothing blocked.</li>';
     panel.innerHTML = `
     <div class="rs-field">
       <label class="rs-label">Open popup hotkey</label>
@@ -1158,9 +1149,11 @@
 
     <div class="rs-field">
       <label class="rs-label">Blocked subreddits</label>
-      <div class="rs-hint">Removed from history with the \u{1F5D1} button. They are not
-        tracked again until you restore them here.</div>
-      <ul class="rs-targets rs-blocked-list">${blockedRows}</ul>
+      <textarea class="rs-input rs-blocked-input" rows="4" spellcheck="false"
+                placeholder="one subreddit per line">${escAttr(settings.blocked.join("\n"))}</textarea>
+      <div class="rs-hint">One subreddit per line, without the r/ \u2014 the \u{1F5D1} button
+        adds them here. A blocked subreddit is not tracked again, so delete its
+        line to let it back into the list.</div>
     </div>
 
     <div class="rs-status"></div>
@@ -1251,16 +1244,17 @@
       updateTarget(index, role === "mode" ? { mode: sel.value } : { events: sel.value });
       say("Target updated.");
     });
-    panel.querySelector(".rs-blocked-list").addEventListener("click", (e) => {
-      const btn = e.target.closest('[data-role="unblock"]');
-      if (!btn) return;
+    const blockedInput = panel.querySelector(".rs-blocked-input");
+    blockedInput.addEventListener("keydown", (e) => {
       e.stopPropagation();
+    });
+    blockedInput.addEventListener("change", () => {
+      const names = blockedInput.value.split("\n").map((line) => line.trim().replace(/^\/?r\//i, "").toLowerCase()).filter(Boolean);
+      const unique = [...new Set(names)];
       const s = loadSettings();
-      const name = s.blocked[Number(btn.dataset.index)];
-      if (!name) return;
-      ctl2.unblock(name);
-      ctl2.rerender(host);
-      say(`r/${name} restored \u2014 it will be tracked again.`);
+      saveSettings({ ...s, blocked: unique });
+      ctl2.refreshList();
+      say(unique.length ? `Saved ${unique.length} blocked subreddit(s).` : "Blocklist cleared.");
     });
     panel.querySelector('[data-role="reset"]').addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1489,7 +1483,7 @@
     isPopupVisible,
     togglePopup,
     applyTargets,
-    unblock: unblock2,
+    refreshList,
     // A setter, not a function reference: the panel replaces the active combo.
     setActiveHotkey: (combo) => {
       activeHotkey = combo;
@@ -1508,8 +1502,8 @@
   function removeVisit2(name) {
     removeVisit(name, refreshAll);
   }
-  function unblock2(name) {
-    unblock(name, refreshAll);
+  function refreshList() {
+    refreshAll(loadData());
   }
   function buildPopupShell() {
     const popup = document.createElement("div");

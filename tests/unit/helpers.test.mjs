@@ -17,7 +17,7 @@ import { parseHotkey, hotkeyMatches, comboFromEvent } from '../../src/hotkey.js'
 import { formatTimeAgo } from '../../src/time.js';
 import { getSubredditFromUrl } from '../../src/visits.js';
 import { ICON_MAX_ATTEMPTS, ICON_RETRY_DELAYS } from '../../src/icons.js';
-import { trackVisit, removeVisit, unblock } from '../../src/visits.js';
+import { trackVisit, removeVisit } from '../../src/visits.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUILT = join(HERE, '..', '..', 'recent-subreddits.user.js');
@@ -289,15 +289,5 @@ describe('visit tracking and the blacklist', () => {
     assert.deepEqual(readSettings(store).blocked, ['webdev'], 'still one entry');
   });
 
-  test('unblocking restores tracking', () => {
-    const store = {
-      recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], blocked: ['webdev'] }),
-    };
-    withStore(store, '/r/webdev/', () => {
-      unblock('webdev', () => {});
-      trackVisit('webdev');
-    });
-    assert.deepEqual(readSettings(store).blocked, [], 'unblocked');
-    assert.deepEqual(readData(store).recent.map((r) => r.name), ['webdev'], 'and tracked again');
-  });
+
 });

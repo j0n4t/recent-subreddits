@@ -142,6 +142,15 @@ export function injectStyles() {
       border-color: var(--rs-accent);
       box-shadow: 0 0 0 2px var(--rs-accent-soft);
     }
+    /* The blocklist is one name per line, so it needs a textarea rather than the
+       single-line input the other fields use. */
+    .rs-blocked-input {
+      display: block;
+      resize: vertical;
+      min-height: 56px;
+      font-family: monospace;
+      line-height: 1.5;
+    }
     .rs-hint {
       font-size: 11px;
       color: var(--rs-text-muted);

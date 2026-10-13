@@ -7,7 +7,7 @@ import {
 
 import { checkTriggers } from './diagnostics.js';
 import { injectStyles } from './styles.js';
-import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore, removeVisit as removeVisitInStore, unblock as unblockInStore } from './visits.js';
+import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore, removeVisit as removeVisitInStore } from './visits.js';
 import { harvestCurrentSubredditIcon } from './icons.js';
 import { positionPopup, positionPopupCentered } from './position.js';
 import { renderContent as renderContentInto } from './content.js';
@@ -38,7 +38,7 @@ const panelCtl = {
   isPopupVisible,
   togglePopup,
   applyTargets,
-  unblock,
+  refreshList,
   // A setter, not a function reference: the panel replaces the active combo.
   setActiveHotkey: (combo) => { activeHotkey = combo; },
 };
@@ -67,9 +67,9 @@ function removeVisit(name) {
   removeVisitInStore(name, refreshAll);
 }
 
-/** Un-blacklist a subreddit so it can be tracked again, and repaint. */
-function unblock(name) {
-  unblockInStore(name, refreshAll);
+/** Repaint the list in every mounted instance. */
+function refreshList() {
+  refreshAll(loadData());
 }
 
 /**
