@@ -2,7 +2,11 @@
 
 Known gaps and the reasoning behind each, ordered by what I would do first. This
 is a working list, not a roadmap: an item is done when it is deleted from here,
-and anything measured should say what was measured.
+and anything measured says what was measured.
+
+The repo is local-only for now. Anything that only pays off with a remote (CI) is
+listed under "When this goes online" at the end rather than in the priority order
+— until then, `npm run check` before a commit is the gate.
 
 Priorities are **1 = do next**. Each entry says why it matters and how to tell it
 is fixed.
@@ -17,29 +21,15 @@ build and commit) and tooling that matches text anchors — targeted edits, patc
 — fails on multi-line matches for no visible reason. This has cost real time
 repeatedly, and it will keep doing so.
 
-**Fix.** Add `.gitattributes` with `* text=auto eol=lf`.
+**Fix.** Add `.gitattributes` with `* text=auto eol=lf`. An `.editorconfig`
+saying the same thing belongs in the same commit.
 
 **Done when.** `git status` after a build is clean and no CRLF warnings appear on
 commit.
 
 ---
 
-## 2. Nothing runs the suite automatically (no CI)
-
-**Why it matters.** The suite is the strongest thing in this repo — 25 unit and
-61 e2e tests, with a CDP harness that needs no puppeteer/playwright dependency —
-but it only runs when someone remembers to run it. Nothing stops a regression
-from being committed.
-
-**Fix.** A workflow running `npm run check` on push. `findBrowser()` already
-skips cleanly when no browser is present, and the harness documents the
-Playwright cache location, so e2e can run in CI rather than being skipped.
-
-**Done when.** A pull request cannot merge with a red suite.
-
----
-
-## 3. A stale committed artifact is not caught
+## 2. A stale committed artifact is not caught
 
 **Why it matters.** `recent-subreddits.user.js` is a build output that is
 committed, because it is the file users paste into Tampermonkey. It was touched
@@ -48,29 +38,112 @@ output — which means a *stale committed artifact* passes every test while bein
 wrong for the user who installs it.
 
 **Fix.** The build is deterministic (verified: rebuilding an unchanged tree
-produces no diff), so `npm run build && git diff --exit-code` is an exact gate.
+produces no diff), so a local script covers it with no CI needed:
 
-**Done when.** CI fails when the committed artifact does not match `src/`.
+```json
+"verify": "npm run check && npm run build && git diff --exit-code"
+```
+
+**Done when.** `npm run verify` fails when the committed artifact does not match
+`src/`.
 
 ---
 
-## 4. The built-in selector is duplicated across four files
+## 3. Tests embed JavaScript as strings, so nothing can check them
 
-**Why it matters.** `TRIGGER_SELECTOR` is hand-copied into `tests/e2e/sidebar.test.mjs`,
-`tests/fixtures/reddit-mock.html` and `tests/unit/helpers.test.mjs`. A change to
-the real selector silently leaves the tests asserting the old one — the tests
-would keep passing while testing nothing real.
+**Why it matters.** There are 237 `b.evaluate(\`...\`)` calls. The test logic
+lives inside template literals, which means:
 
-**Fix.** The tests are ESM, so they can import `BUILTIN_HOOK` from `src/defaults.js`
-directly. The fixture cannot (it is a plain page), so keep one copy there plus a
-test asserting the fixture's copy equals the source.
+- **ESLint cannot see it.** `npx eslint tests/` reports 0 messages across 4 files
+  — not because the tests are clean, but because the rules stop at the string
+  boundary. A typo inside an `evaluate` is invisible to the linter.
+- **TypeScript cannot see it.** `tsconfig.json` covers `src` only.
+- **Escaping is manual and silent.** 7 lines carry `\\` escapes. This already bit
+  once during development: a `\\s` in a heredoc reached the page as `s` and
+  corrupted the output, which was only caught by reading it closely.
+
+**Fix.** A `run(fn, ...args)` helper in the harness that serialises a real
+function instead of a hand-written string:
+
+```js
+const width = await b.evaluate(run((sel) => {
+  const el = document.querySelector(sel);
+  return el ? el.getBoundingClientRect().width : null;
+}, '#pick-target'));
+```
+
+The function body is then real code — lintable, typecheckable, no escaping.
+Adopt it for new tests first; migrate existing ones as they are touched.
+
+**Done when.** No new test needs a backslash escape, and the lint scope covers
+test logic rather than skipping over it.
+
+---
+
+## 4. Repeated preambles in the e2e suite
+
+**Why it matters.** Measured: 34 occurrences of the "hover the logo, wait for the
+popup" preamble and 29 of the "open settings, wait for `settings-open`" dance,
+all written out inline. This is not hypothetical brittleness — when the built-in
+trigger became a settings entry, 7 tests had to be edited individually because
+each carried its own copy of how to open the popup.
+
+**Fix.** Helpers next to the existing `HOVER`/`PRESS` constants:
+
+```js
+async function openPopup(b)      // hover the trigger, wait for visible
+async function openSettings(b)   // the above, then open + wait for the panel
+async function openByHotkey(b)   // for tests that seed their own targets
+```
+
+**Done when.** A change to how the popup opens touches one helper, not 34 sites.
+
+---
+
+## 5. Two `withStore` helpers in the unit suite
+
+**Why it matters.** `tests/unit/helpers.test.mjs` defines `withStore` at line 216
+(takes a pathname) and again at line 296 (does not). The second was added rather
+than generalising the first, so two implementations of the same fixture will
+drift.
+
+**Fix.** One helper with an options argument; both call sites use it.
+
+**Done when.** `grep -c "function withStore"` returns 1.
+
+---
+
+## 6. Index-based assertions in the tests
+
+**Why it matters.** `targets[1].mode` and `.at(-1)` assume a row order. That is
+exactly what broke when the seeded built-in hook started appearing first: the
+assertions stayed true statements about the array but stopped being statements
+about the thing under test.
+
+**Fix.** Select by predicate — find the target whose `selector` is the one the
+test picked — rather than by position.
+
+**Done when.** No test asserts on a positional index into a settings array.
+
+---
+
+## 7. The built-in selector is duplicated across four files
+
+**Why it matters.** `TRIGGER_SELECTOR` is hand-copied into
+`tests/e2e/sidebar.test.mjs`, `tests/fixtures/reddit-mock.html` and
+`tests/unit/helpers.test.mjs`. A change to the real selector silently leaves the
+tests asserting the old one — the tests keep passing while testing nothing real.
+
+**Fix.** The tests are ESM, so they can import `BUILTIN_HOOK` from
+`src/defaults.js` directly. The fixture cannot (it is a plain page), so keep one
+copy there plus a test asserting the fixture's copy equals the source.
 
 **Done when.** `grep -r navbar-menu-button` finds one definition plus one
 deliberate fixture copy, with a test tying them together.
 
 ---
 
-## 5. The measurements this design rests on are not preserved
+## 8. The measurements this design rests on are not preserved
 
 **Why it matters.** Several decisions depend on facts measured against the live
 site, and those facts are not written down anywhere durable:
@@ -94,7 +167,7 @@ claims cannot be re-verified without rewriting them.
 
 ---
 
-## 6. README has drifted from the code
+## 9. README has drifted from the code
 
 **Why it matters.** Two concrete regressions:
 
@@ -110,7 +183,7 @@ appears in `src/`.
 
 ---
 
-## 7. The e2e fixture is a `file://` page, so URL-dependent code is untestable
+## 10. The e2e fixture is a `file://` page, so URL-dependent code is untestable
 
 **Why it matters.** Because the fixture has no `/r/<name>/` path, `trackVisit()`
 never runs in e2e — the "a blacklisted subreddit is never tracked again" test had
@@ -126,7 +199,7 @@ in e2e.
 
 ---
 
-## 8. A harvest failure is silent
+## 11. A harvest failure is silent
 
 **Why it matters.** `checkTriggers()` warns when configured hooks match nothing,
 which makes a Reddit markup change visible. The harvest has the same failure
@@ -140,7 +213,7 @@ the exact bug this repo already fixed once — with nothing in the console.
 
 ---
 
-## 9. `escAttr` lives in `icons.js`
+## 12. `escAttr` lives in `icons.js`
 
 **Why it matters.** It is a generic HTML-escaping helper defined in the icon
 module and imported by `content.js` and `settings-panel.js` for unrelated
@@ -153,7 +226,7 @@ false, and a reader editing icon logic meets an HTML helper they did not expect.
 
 ---
 
-## 10. The injected stylesheet is never validated
+## 13. The injected stylesheet is never validated
 
 **Why it matters.** `injectStyles()` builds one large CSS string. A typo — a
 missing brace, a misspelled property — fails silently at runtime, and nothing
@@ -167,7 +240,7 @@ after injection. Cheap and it closes a whole failure class.
 
 ---
 
-## 11. Keyboard navigation in the popup
+## 14. Keyboard navigation in the popup
 
 **Why it matters.** The hotkey exists so the popup works regardless of Reddit's
 markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
@@ -178,7 +251,7 @@ existing trash/blocklist logic.
 
 ---
 
-## 12. Import / export settings
+## 15. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey
@@ -189,7 +262,7 @@ configuration is meaningful.
 
 ---
 
-## 13. Relative timestamps freeze while the popup is open
+## 16. Relative timestamps freeze while the popup is open
 
 **Why it matters.** `formatTimeAgo` runs at render only, so an open popup keeps
 showing "just now" indefinitely.
@@ -198,13 +271,31 @@ showing "just now" indefinitely.
 
 ---
 
-## 14. An inline target that matches nothing is silent
+## 17. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming
 the target would save the user guessing why their block never appeared.
 
 **Done when.** A configured target matching nothing is reported once per page.
+
+---
+
+## When this goes online
+
+Not worth doing while the repo is local; worth doing the moment it has a remote,
+roughly in this order.
+
+- **CI running `npm run check`.** The suite is the strongest thing here and
+  nothing runs it automatically. `findBrowser()` already skips cleanly with no
+  browser present, and the harness documents the Playwright cache location, so
+  e2e can run in CI rather than being skipped.
+- **The artifact-freshness gate in CI too**, so a pull request cannot merge a
+  stale build. Item 2 covers the local script; CI makes it enforceable.
+- **`.gitattributes` matters more** once anyone else clones — the CRLF churn
+  becomes their problem too.
+- **Check a `LICENSE` file exists.** The README says MIT; confirm the file is
+  really there before the repo is public.
 
 ---
 
@@ -216,9 +307,14 @@ the target would save the user guessing why their block never appeared.
   choice. Adding one now would produce a large reformat diff and fight the HTML
   template literals. Targeted lint rules are the better lever if this changes.
 - **Splitting modules for size.** The largest is `styles.js` at 472 lines, of
-  which 435 are CSS, already sectioned by concern. Nothing here is too big to
-  hold in your head; splitting would add indirection for no gain.
-- **Typechecking `tests/`.** `tsconfig.json` covers `src` only, but most test
-  bodies are `b.evaluate(\`...\`)` strings that a typechecker cannot see into.
+  which 435 are CSS, already sectioned by concern. `app.js` is next at 396 (253
+  code). Nothing here is too big to hold in your head; splitting would add
+  indirection for no gain.
+- **Splitting the e2e test file.** It is 1977 lines, but a flat list of 61 tests
+  that greps cleanly. Splitting it would scatter the shared fixture and helpers
+  for no gain — item 4 is the fix that actually reduces the weight.
+- **Typechecking `tests/`.** `tsconfig.json` covers `src` only. Extending it
+  would not help much while test logic lives in strings; item 3 is the fix that
+  makes typechecking tests meaningful.
 - **Multiple settings profiles.** The target model would support it, but nothing
   suggests the complexity is wanted.
