@@ -301,10 +301,12 @@ describe('the built-in trigger as a default setting', () => {
     // The trigger used to be a hardcoded fallback in the resolver. It has to be
     // in the defaults instead, or a fresh install would have hover disabled.
     assert.equal(DEFAULT_SETTINGS.targets.length, 1, 'the defaults must include one target');
-    const t = DEFAULT_SETTINGS.targets[0];
+    // Selected by what it is, not by where it sits: a positional pick would keep
+    // passing if the defaults gained another target in front of this one.
+    const t = DEFAULT_SETTINGS.targets.find((x) => /top-nav-logo/.test(x.selector));
+    assert.ok(t, 'the built-in selector must be among the defaults');
     assert.equal(t.mode, 'hook');
     assert.equal(t.events, 'both');
-    assert.match(t.selector, /top-nav-logo/, 'the built-in selector must be there');
     assert.match(t.selector, /navbar-menu-button/, 'including the mobile menu button');
   });
 

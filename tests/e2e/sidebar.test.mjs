@@ -1068,9 +1068,12 @@ describe('recent-subreddits sidebar', { skip }, () => {
       true,
       'settings must reopen after a pick'
     );
+    // Assert by predicate, not by row position: the picked target must be
+    // listed, regardless of where it sits relative to the built-in hook.
     assert.equal(
-      await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-target-sel')).map(c => c.textContent).at(-1))),
-      '#pick-target',
+      await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-target-sel'))
+        .some((c) => c.textContent === '#pick-target'))),
+      true,
       'the target must be listed in settings'
     );
   });
@@ -1244,9 +1247,12 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(run(() => !document.getElementById('rs-picker-hint')), 'picker closed');
 
     const changed = await b.evaluate(run(() => {
-      // The last row is the one just picked; the seeded built-in hook is first.
-      const sels = document.querySelectorAll('[data-role="mode"]');
-      const sel = sels[sels.length - 1];
+      // Find the row for the target just picked, by its selector — the seeded
+      // built-in hook is another row, and a positional pick would silently
+      // follow whichever order the rows happen to be in.
+      const row = Array.from(document.querySelectorAll('.rs-target'))
+        .find((li) => li.querySelector('.rs-target-sel').textContent === '#pick-target');
+      const sel = row.querySelector('[data-role="mode"]');
       sel.value = 'replace';
       sel.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
@@ -1254,17 +1260,18 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.equal(changed, true);
 
     await b.waitUntil(
-      run(() => JSON.parse(window.__store.recentSubredditsSettings).targets[1].mode === 'replace'),
+      run(() => JSON.parse(window.__store.recentSubredditsSettings)
+        .targets.find((t) => t.selector === '#pick-target')?.mode === 'replace'),
       'the mode change to be persisted'
     );
 
     // A replace target has no event choice — the control is gone for that row,
-    // while the built-in hook above it still has one.
+    // while the built-in hook still has one.
     assert.equal(
       await b.evaluate(run(() => {
-        const rows = Array.from(document.querySelectorAll('.rs-target'));
-        const last = rows[rows.length - 1];
-        return last.querySelector('[data-role="events"]') === null;
+        const row = Array.from(document.querySelectorAll('.rs-target'))
+          .find((li) => li.querySelector('.rs-target-sel').textContent === '#pick-target');
+        return row.querySelector('[data-role="events"]') === null;
       })),
       true,
       'the events selector must not be offered for a non-hook mode'
