@@ -114,6 +114,9 @@ npm run check    # lint + typecheck + both suites
 never drift from `src/`. The build is deterministic — rebuilding an unchanged
 tree produces no diff.
 
+Known gaps and their reasoning are tracked in [TECH_DEBT.md](TECH_DEBT.md),
+ordered by what to do first.
+
 ### Manual test against the real site
 
 The automated suite runs against a local fixture, so it can only assert things
