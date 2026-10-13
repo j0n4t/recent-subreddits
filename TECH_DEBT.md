@@ -13,21 +13,7 @@ is fixed.
 
 ---
 
-## 1. Index-based assertions in the tests
-
-**Why it matters.** `targets[1].mode` and `.at(-1)` assume a row order. That is
-exactly what broke when the seeded built-in hook started appearing first: the
-assertions stayed true statements about the array but stopped being statements
-about the thing under test.
-
-**Fix.** Select by predicate — find the target whose `selector` is the one the
-test picked — rather than by position.
-
-**Done when.** No test asserts on a positional index into a settings array.
-
----
-
-## 2. The built-in selector is duplicated across four files
+## 1. The built-in selector is duplicated across four files
 
 **Why it matters.** `TRIGGER_SELECTOR` is hand-copied into
 `tests/e2e/sidebar.test.mjs`, `tests/fixtures/reddit-mock.html` and
@@ -43,7 +29,7 @@ deliberate fixture copy, with a test tying them together.
 
 ---
 
-## 3. The measurements this design rests on are not preserved
+## 2. The measurements this design rests on are not preserved
 
 **Why it matters.** Several decisions depend on facts measured against the live
 site, and those facts are not written down anywhere durable:
@@ -67,7 +53,7 @@ claims cannot be re-verified without rewriting them.
 
 ---
 
-## 4. README has drifted from the code
+## 3. README has drifted from the code
 
 **Why it matters.** Two concrete regressions:
 
@@ -83,7 +69,7 @@ appears in `src/`.
 
 ---
 
-## 5. The e2e fixture is a `file://` page, so URL-dependent code is untestable
+## 4. The e2e fixture is a `file://` page, so URL-dependent code is untestable
 
 **Why it matters.** Because the fixture has no `/r/<name>/` path, `trackVisit()`
 never runs in e2e — the "a blacklisted subreddit is never tracked again" test had
@@ -99,7 +85,7 @@ in e2e.
 
 ---
 
-## 6. A harvest failure is silent
+## 5. A harvest failure is silent
 
 **Why it matters.** `checkTriggers()` warns when configured hooks match nothing,
 which makes a Reddit markup change visible. The harvest has the same failure
@@ -113,7 +99,7 @@ the exact bug this repo already fixed once — with nothing in the console.
 
 ---
 
-## 7. `escAttr` lives in `icons.js`
+## 6. `escAttr` lives in `icons.js`
 
 **Why it matters.** It is a generic HTML-escaping helper defined in the icon
 module and imported by `content.js` and `settings-panel.js` for unrelated
@@ -126,7 +112,7 @@ false, and a reader editing icon logic meets an HTML helper they did not expect.
 
 ---
 
-## 8. The injected stylesheet is never validated
+## 7. The injected stylesheet is never validated
 
 **Why it matters.** `injectStyles()` builds one large CSS string. A typo — a
 missing brace, a misspelled property — fails silently at runtime, and nothing
@@ -140,7 +126,7 @@ after injection. Cheap and it closes a whole failure class.
 
 ---
 
-## 9. Keyboard navigation in the popup
+## 8. Keyboard navigation in the popup
 
 **Why it matters.** The hotkey exists so the popup works regardless of Reddit's
 markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
@@ -151,7 +137,7 @@ existing trash/blocklist logic.
 
 ---
 
-## 10. Import / export settings
+## 9. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey
@@ -162,7 +148,7 @@ configuration is meaningful.
 
 ---
 
-## 11. Relative timestamps freeze while the popup is open
+## 10. Relative timestamps freeze while the popup is open
 
 **Why it matters.** `formatTimeAgo` runs at render only, so an open popup keeps
 showing "just now" indefinitely.
@@ -171,7 +157,7 @@ showing "just now" indefinitely.
 
 ---
 
-## 12. An inline target that matches nothing is silent
+## 11. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming
