@@ -74,7 +74,7 @@ const SETTINGS_KEY = 'recentSubredditsSettings';
 // The escape hatch: a shortcut that opens the popup without depending on any
 // Reddit selector. If the header markup changes and the logo stops matching,
 // this still works, so a markup change degrades the feature instead of killing it.
-export const DEFAULT_SETTINGS = { hotkey: 'Alt+Shift+R', targets: [] };
+export const DEFAULT_SETTINGS = { hotkey: 'Alt+Shift+R', targets: [], blocked: [] };
 
 // Which page elements the user hooked, and how each one behaves.
 //   hook    — hovering/clicking it opens the popup
@@ -108,10 +108,27 @@ function normalizeTargets(raw) {
   return out;
 }
 
+/**
+ * The blacklist: subreddits the user removed from history. A blocked subreddit
+ * is never tracked again, so it cannot reappear in the list — the only way back
+ * is to un-block it in settings. Normalized here so a hand-edited store cannot
+ * put junk in it.
+ */
+function normalizeBlocked(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const name of raw) {
+    if (typeof name !== 'string') continue;
+    const n = name.trim().toLowerCase();
+    if (n && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
 export function loadSettings() {
   try {
     const raw = GM_getValue(SETTINGS_KEY, null);
-    if (!raw) return { hotkey: DEFAULT_SETTINGS.hotkey, targets: [] };
+    if (!raw) return { ...DEFAULT_SETTINGS, targets: [], blocked: [] };
     const parsed = JSON.parse(raw);
     return {
       hotkey:
@@ -119,9 +136,10 @@ export function loadSettings() {
           ? parsed.hotkey.trim()
           : DEFAULT_SETTINGS.hotkey,
       targets: normalizeTargets(parsed.targets),
+      blocked: normalizeBlocked(parsed.blocked),
     };
   } catch {
-    return { hotkey: DEFAULT_SETTINGS.hotkey, targets: [] };
+    return { ...DEFAULT_SETTINGS, targets: [], blocked: [] };
   }
 }
 

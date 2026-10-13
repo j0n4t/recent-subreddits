@@ -22,6 +22,7 @@
       ?iconFail=<name:tries,...> the first N icon fetches for a subreddit answer
                                  with a real 403 + HTML body (which is what reddit
                                  does under rate limiting), then succeed
+      ?blocked=<name,...>        seed the settings blacklist with these names
       ?sub=<name>                the page is a subreddit view: adds reddit's own
                                  `#subreddit-icon-img` + header, holding the icon
                                  the harvest should adopt (no fetch needed)
@@ -80,6 +81,17 @@
     const settingsParam = params.get('settings');
     if (settingsParam) {
       store.recentSubredditsSettings = decodeURIComponent(escape(atob(settingsParam)));
+    }
+
+    // ?blocked=a,b — the settings blacklist, so a test can start with a
+    // subreddit already removed from history. Independent of ?settings=.
+    const blockedParam = params.get('blocked');
+    if (blockedParam) {
+      const existing = store.recentSubredditsSettings
+        ? JSON.parse(store.recentSubredditsSettings)
+        : { hotkey: 'Alt+Shift+R', targets: [] };
+      existing.blocked = blockedParam.split(',').map((s) => s.trim()).filter(Boolean);
+      store.recentSubredditsSettings = JSON.stringify(existing);
     }
 
     window.__store = store;

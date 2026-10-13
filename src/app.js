@@ -7,7 +7,7 @@ import {
 
 import { checkTriggers } from './diagnostics.js';
 import { injectStyles } from './styles.js';
-import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore } from './visits.js';
+import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore, removeVisit as removeVisitInStore, unblock as unblockInStore } from './visits.js';
 import { harvestCurrentSubredditIcon } from './icons.js';
 import { positionPopup, positionPopupCentered } from './position.js';
 import { renderContent as renderContentInto } from './content.js';
@@ -38,6 +38,7 @@ const panelCtl = {
   isPopupVisible,
   togglePopup,
   applyTargets,
+  unblock,
   // A setter, not a function reference: the panel replaces the active combo.
   setActiveHotkey: (combo) => { activeHotkey = combo; },
 };
@@ -59,6 +60,16 @@ function refreshAll(data) {
 /** Toggle a pin and repaint every instance showing it. */
 function togglePin(name) {
   togglePinInStore(name, refreshAll);
+}
+
+/** Drop a subreddit from history and repaint every instance showing it. */
+function removeVisit(name) {
+  removeVisitInStore(name, refreshAll);
+}
+
+/** Un-blacklist a subreddit so it can be tracked again, and repaint. */
+function unblock(name) {
+  unblockInStore(name, refreshAll);
 }
 
 /**
@@ -193,6 +204,7 @@ function mountSidebar() {
     buildPopupShell,
     render: renderContent,
     togglePin,
+    removeVisit,
     setSettingsOpen,
   });
 
@@ -227,6 +239,12 @@ function mountSidebar() {
     if (pin) {
       e.stopPropagation();
       togglePin(pin.dataset.name);
+      return;
+    }
+    const remove = e.target.closest('.rs-remove-btn');
+    if (remove) {
+      e.stopPropagation();
+      removeVisit(remove.dataset.name);
       return;
     }
     if (e.target.closest('.rs-close-btn')) {

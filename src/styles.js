@@ -307,6 +307,28 @@ export function injectStyles() {
       transition: opacity 0.15s;
     }
     .rs-pin-btn:hover, .rs-unpin-btn:hover { opacity: 1; }
+    /* The trash sits next to the pin and matches it, so a row's controls read as
+       one group. Recent rows only — the Pinned section uses the ✕ above. */
+    .rs-remove-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px;
+      font-size: 12px;
+      /* Two things are load-bearing here, both verified by rendering the variants
+         side by side on a dark background:
+         - the colour must be SET. The pin gets away with inheriting because it is
+           an emoji and renders in its own colours, but the trash is a monochrome
+           glyph, so unset it inherits whatever the host page uses.
+         - it must be the full text colour, not the muted token: as a thin outline
+           glyph the muted one measured as borderline/invisible against a dark
+           background. The VS16 emoji variant (which would match the pin's weight)
+           is not an option — it renders as tofu on Windows.
+         Hover turns it red, so the destructive action is explicit. */
+      color: var(--rs-text);
+      transition: color 0.15s;
+    }
+    .rs-remove-btn:hover { color: var(--rs-error); }
     .rs-empty {
       color: var(--rs-text-muted);
       font-style: italic;

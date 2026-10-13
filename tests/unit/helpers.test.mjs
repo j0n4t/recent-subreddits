@@ -17,6 +17,7 @@ import { parseHotkey, hotkeyMatches, comboFromEvent } from '../../src/hotkey.js'
 import { formatTimeAgo } from '../../src/time.js';
 import { getSubredditFromUrl } from '../../src/visits.js';
 import { ICON_MAX_ATTEMPTS, ICON_RETRY_DELAYS } from '../../src/icons.js';
+import { trackVisit, removeVisit, unblock } from '../../src/visits.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUILT = join(HERE, '..', '..', 'recent-subreddits.user.js');
@@ -202,5 +203,101 @@ describe('icon retry policy', () => {
   test('more than one attempt is allowed before giving up', () => {
     // A single attempt is the old bug: one 403 and the row is grey forever.
     assert.ok(ICON_MAX_ATTEMPTS > 1, `must retry at least once, got ${ICON_MAX_ATTEMPTS}`);
+  });
+});
+
+describe('visit tracking and the blacklist', () => {
+  // These drive the real functions against a stubbed GM store. The e2e suite
+  // cannot cover this: its fixture is a file:// page, so there is no subreddit
+  // URL for the tracker to read, and trackVisit() never runs there.
+
+  /** Install a GM store + location, run `fn`, then restore the globals. */
+  function withStore(store, pathname, fn) {
+    const prev = {
+      GM_getValue: globalThis.GM_getValue,
+      GM_setValue: globalThis.GM_setValue,
+      window: globalThis.window,
+    };
+    globalThis.GM_getValue = (k, d) => (k in store ? store[k] : d);
+    globalThis.GM_setValue = (k, v) => { store[k] = v; };
+    globalThis.window = { location: { pathname } };
+    try {
+      return fn(store);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete globalThis[k];
+        else globalThis[k] = v;
+      }
+    }
+  }
+
+  const readData = (store) => JSON.parse(store.recentSubreddits || '{"recent":[],"pinned":[]}');
+  const readSettings = (store) => JSON.parse(store.recentSubredditsSettings || '{"blocked":[]}');
+
+  test('a visit is recorded', () => {
+    const store = {};
+    withStore(store, '/r/webdev/', () => trackVisit('webdev'));
+    assert.deepEqual(readData(store).recent.map((r) => r.name), ['webdev']);
+  });
+
+  test('a blacklisted subreddit is never tracked again', () => {
+    // This is the whole point of the blacklist, and it is the behaviour the trash
+    // button promises when it says "Remove from history".
+    const store = {
+      recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], blocked: ['webdev'] }),
+    };
+    withStore(store, '/r/webdev/', () => trackVisit('webdev'));
+    assert.deepEqual(
+      readData(store).recent,
+      [],
+      'a blocked subreddit must not be added to history'
+    );
+  });
+
+  test('a blocked subreddit is not re-added even if it is already in history', () => {
+    // The removal drops the row, but history can hold a name that was blocked
+    // later (e.g. blocked on another device, or seeded by hand). Visiting it must
+    // not resurrect it.
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [{ name: 'webdev', visitedAt: 1 }], pinned: [] }),
+      recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], blocked: ['webdev'] }),
+    };
+    withStore(store, '/r/webdev/', () => trackVisit('webdev'));
+    assert.deepEqual(readData(store).recent.map((r) => r.name), ['webdev'], 'unchanged');
+  });
+
+  test('removing a visit drops the row and blacklists the name', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({
+        recent: [{ name: 'webdev', visitedAt: 1 }, { name: 'linux', visitedAt: 2 }],
+        pinned: [],
+      }),
+      recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [] }),
+    };
+    withStore(store, '/', () => removeVisit('webdev', () => {}));
+
+    assert.deepEqual(readData(store).recent.map((r) => r.name), ['linux'], 'row dropped');
+    assert.deepEqual(readSettings(store).blocked, ['webdev'], 'and blacklisted');
+  });
+
+  test('removing twice does not duplicate the blacklist entry', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [{ name: 'webdev', visitedAt: 1 }], pinned: [] }),
+      recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], blocked: ['webdev'] }),
+    };
+    withStore(store, '/', () => removeVisit('webdev', () => {}));
+    assert.deepEqual(readSettings(store).blocked, ['webdev'], 'still one entry');
+  });
+
+  test('unblocking restores tracking', () => {
+    const store = {
+      recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], blocked: ['webdev'] }),
+    };
+    withStore(store, '/r/webdev/', () => {
+      unblock('webdev', () => {});
+      trackVisit('webdev');
+    });
+    assert.deepEqual(readSettings(store).blocked, [], 'unblocked');
+    assert.deepEqual(readData(store).recent.map((r) => r.name), ['webdev'], 'and tracked again');
   });
 });

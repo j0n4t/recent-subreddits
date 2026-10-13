@@ -49,6 +49,9 @@ export function renderContent(data, instance, isMounted) {
       html += `<a href="/r/${encodeURIComponent(sub.name)}" class="rs-link">r/${sub.name}</a>`;
       html += `<span class="rs-time">${timeAgo}</span>`;
       html += `<button class="rs-pin-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Pin">📌</button>`;
+      // The trash removes the entry from history. Recent rows only: the Pinned
+      // section already has its own ✕ unpin control.
+      html += `<button class="rs-remove-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Remove from history">🗑</button>`;
       html += `</li>`;
     }
     html += '</ul></div>';

@@ -194,6 +194,176 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(isVisible, 'popup to show when a trigger child is hovered');
   });
 
+  test('remove: the trash drops a subreddit from history and persists it', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+
+    // Every recent row offers a trash; the Pinned section does not (it has its
+    // own unpin control).
+    const controls = await b.evaluate(`({
+      recentRows: document.querySelectorAll('.rs-section:not(.rs-pinned-section) .rs-item').length,
+      trashes: document.querySelectorAll('.rs-remove-btn').length,
+      trashesInPinned: document.querySelectorAll('.rs-pinned-section .rs-remove-btn').length,
+    })`);
+    assert.equal(controls.trashes, controls.recentRows, 'every recent row needs a trash');
+    assert.equal(controls.trashesInPinned, 0, 'the pinned section must not get a trash');
+
+    await b.evaluate(`document.querySelector('.rs-remove-btn[data-name="webdev"]').click()`);
+
+    await b.waitUntil(
+      `!Array.from(document.querySelectorAll('.rs-link')).some(a => a.textContent === 'r/webdev')`,
+      'r/webdev to disappear from the list'
+    );
+    // No confirmation: one click, and it is gone.
+    assert.equal(await b.evaluate(isVisible), true, 'popup must stay open after removing');
+
+    // Persisted, not just rendered — a reload must not bring it back.
+    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubreddits`));
+    assert.deepEqual(
+      stored.recent.map((r) => r.name),
+      ['javascript', 'linux', 'rust'],
+      'the removal must be written to GM storage'
+    );
+  });
+
+  test('remove: a pinned subreddit is not in Recent, so it cannot be removed from there', async () => {
+    // The trash is a history control. r/linux is pinned, so it is filtered out of
+    // Recent and only the unpin control applies to it.
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+
+    const state = await b.evaluate(`({
+      linuxTrash: !!document.querySelector('.rs-remove-btn[data-name="linux"]'),
+      linuxInRecent: Array.from(document.querySelectorAll('.rs-section:not(.rs-pinned-section) .rs-link'))
+        .some(a => a.textContent === 'r/linux'),
+      linuxPinned: Array.from(document.querySelectorAll('.rs-pinned .rs-link'))
+        .some(a => a.textContent === 'r/linux'),
+    })`);
+    assert.equal(state.linuxInRecent, false, 'a pinned subreddit must not be listed under Recent');
+    assert.equal(state.linuxPinned, true, 'r/linux should be pinned in this fixture');
+    assert.equal(state.linuxTrash, false, 'a pinned subreddit must not offer a trash');
+  });
+
+  test('remove: emptying the history shows the empty state', async () => {
+    // The fixture pins r/linux, so clearing Recent must leave only the Pinned
+    // section — no "no subreddits visited yet" line, because the list is not empty.
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+
+    for (const name of ['javascript', 'webdev', 'rust']) {
+      await b.evaluate(`document.querySelector('.rs-remove-btn[data-name="${name}"]').click()`);
+      await b.waitUntil(
+        `!document.querySelector('.rs-remove-btn[data-name="${name}"]')`,
+        `r/${name} to be removed`
+      );
+    }
+
+    const state = await b.evaluate(`({
+      recentSection: !!document.querySelector('.rs-section:not(.rs-pinned-section)'),
+      pinned: Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent),
+      empty: !!document.querySelector('.rs-empty'),
+      stored: JSON.parse(window.__store.recentSubreddits).recent.map(r => r.name),
+    })`);
+    assert.deepEqual(state.pinned, ['r/linux'], 'the pin must survive a history clear');
+    assert.equal(state.recentSection, false, 'the Recent section should be gone once empty');
+    assert.equal(state.empty, false, 'a non-empty Pinned list must not show the empty state');
+    // r/linux stays in the stored recent list: pinning does not remove it, the
+    // render just filters pinned names out of the Recent section. Unpinning puts
+    // it back, which the pin/unpin test covers.
+    assert.deepEqual(state.stored, ['linux'], 'only the pinned entry should remain in storage');
+  });
+
+  test('blacklist: the trash adds the subreddit to the blacklist in settings', async () => {
+    // The trash does two things: drop the row, and blacklist the subreddit so it
+    // cannot come back. (That a blocked subreddit is not TRACKED again is a unit
+    // test — see the "visit tracking" suite — because the fixture is a file://
+    // page and so has no subreddit URL for the tracker to read.)
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+
+    assert.equal(
+      await b.evaluate(`document.querySelectorAll('.rs-blocked-list').length`),
+      0,
+      'the blacklist UI only exists inside the settings panel'
+    );
+
+    await b.evaluate(`document.querySelector('.rs-remove-btn[data-name="webdev"]').click()`);
+    await b.waitUntil(
+      `!document.querySelector('.rs-remove-btn[data-name="webdev"]')`,
+      'r/webdev to be removed'
+    );
+
+    const blocked = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`)).blocked;
+    assert.deepEqual(blocked, ['webdev'], 'the removal must blacklist the subreddit');
+  });
+
+  test('blacklist: settings lists blocked subreddits and can restore one', async () => {
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-remove-btn[data-name="rust"]').click()`);
+    await b.waitUntil(
+      `!document.querySelector('.rs-remove-btn[data-name="rust"]')`,
+      'r/rust to be removed'
+    );
+
+    // The settings panel shows the blacklist.
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open'
+    );
+    assert.deepEqual(
+      await b.evaluate(`Array.from(document.querySelectorAll('.rs-blocked-list .rs-target-sel')).map(c => c.textContent)`),
+      ['r/rust'],
+      'the blocked subreddit must be listed in settings'
+    );
+
+    // Restoring removes it from the blacklist and from the settings list.
+    await b.evaluate(`document.querySelector('.rs-blocked-list [data-role="unblock"]').click()`);
+    await b.waitUntil(
+      `document.querySelectorAll('.rs-blocked-list [data-role="unblock"]').length === 0`,
+      'the blocked row to disappear'
+    );
+    assert.deepEqual(
+      JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`)).blocked,
+      [],
+      'restoring must clear the blacklist entry'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelector('.rs-blocked-list .rs-empty').textContent`),
+      'Nothing blocked.',
+      'the empty state must show'
+    );
+  });
+
+  test('remove: works from an inline block too', async () => {
+    // The inline instances are a second mount of the same list, so a trash that
+    // only worked in the popup would be a dead control there.
+    await b.goto(
+      fixtureUrl(DEFAULT_SEED) +
+        '&settings=' +
+        settingsParam({ targets: [{ selector: '#pick-target', mode: 'append' }] })
+    );
+    await b.waitUntil(`!!document.querySelector('.rs-inline')`, 'inline block to mount');
+
+    await b.evaluate(`document.querySelector('.rs-inline .rs-remove-btn[data-name="rust"]').click()`);
+    await b.waitUntil(
+      `!document.querySelector('.rs-inline .rs-remove-btn[data-name="rust"]')`,
+      'r/rust to disappear from the inline block'
+    );
+
+    const stored = JSON.parse(await b.evaluate(`window.__store.recentSubreddits`));
+    assert.ok(
+      !stored.recent.some((r) => r.name === 'rust'),
+      `the inline removal must persist, got ${JSON.stringify(stored.recent.map((r) => r.name))}`
+    );
+  });
+
   test('pin/unpin keeps the popup open and persists the change', async () => {
     await open();
     await b.evaluate(HOVER('#logo'));

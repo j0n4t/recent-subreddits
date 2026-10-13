@@ -67,6 +67,23 @@ export function renderSettingsPanel(instance, ctl) {
       .join('')
     : '<li class="rs-empty">No page targets yet.</li>';
 
+  // The blacklist: subreddits the user removed from history. Restoring one
+  // deletes it from this list, which is what allows it to be tracked again.
+  const blockedRows = settings.blocked.length
+    ? settings.blocked
+      .map(
+        (name, i) => `
+            <li class="rs-target">
+              <code class="rs-target-sel" title="${escAttr(name)}">r/${escAttr(name)}</code>
+              <div class="rs-target-controls">
+                <span class="rs-muted">Blocked</span>
+                <button class="rs-icon-btn" data-role="unblock" data-index="${i}" title="Restore">✕</button>
+              </div>
+            </li>`
+      )
+      .join('')
+    : '<li class="rs-empty">Nothing blocked.</li>';
+
   panel.innerHTML = `
     <div class="rs-field">
       <label class="rs-label">Open popup hotkey</label>
@@ -85,6 +102,13 @@ export function renderSettingsPanel(instance, ctl) {
       <div class="rs-hint">Pick an element on the page, then choose what it does.
         A hook opens the popup; the others render the list inline there.</div>
       <ul class="rs-targets">${targetRows}</ul>
+    </div>
+
+    <div class="rs-field">
+      <label class="rs-label">Blocked subreddits</label>
+      <div class="rs-hint">Removed from history with the 🗑 button. They are not
+        tracked again until you restore them here.</div>
+      <ul class="rs-targets rs-blocked-list">${blockedRows}</ul>
     </div>
 
     <div class="rs-status"></div>
@@ -206,6 +230,20 @@ export function renderSettingsPanel(instance, ctl) {
     const role = sel.dataset.role;
     updateTarget(index, role === 'mode' ? { mode: sel.value } : { events: sel.value });
     say('Target updated.');
+  });
+
+  panel.querySelector('.rs-blocked-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-role="unblock"]');
+    if (!btn) return;
+    e.stopPropagation();
+    const s = loadSettings();
+    const name = s.blocked[Number(btn.dataset.index)];
+    if (!name) return;
+    // Restoring re-renders this panel and repaints the list, so the row leaves
+    // both places at once.
+    ctl.unblock(name);
+    ctl.rerender(host);
+    say(`r/${name} restored — it will be tracked again.`);
   });
 
   panel.querySelector('[data-role="reset"]').addEventListener('click', (e) => {

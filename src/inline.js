@@ -209,6 +209,12 @@ function wireInlineInstance(rec, target) {
       ctl.togglePin(pin.dataset.name);
       return;
     }
+    const remove = e.target.closest('.rs-remove-btn');
+    if (remove) {
+      e.stopPropagation();
+      ctl.removeVisit(remove.dataset.name);
+      return;
+    }
     if (e.target.closest('.rs-close-btn')) {
       e.stopPropagation();
       // The close button removes this binding instead of closing a popup.

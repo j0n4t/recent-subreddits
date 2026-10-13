@@ -1,9 +1,9 @@
 // Visit tracking and pinning
 //
-// The two writes that change what the list shows. Both re-render every mounted
+// The writes that change what the list shows. All re-render every mounted
 // instance afterwards, which is why they take a `refresh` callback rather than
 // importing the render layer themselves.
-import { loadData, saveData, MAX_RECENT } from './storage.js';
+import { loadData, saveData, loadSettings, saveSettings, MAX_RECENT } from './storage.js';
 
 export function getSubredditFromUrl() {
   const path = window.location.pathname;
@@ -17,7 +17,21 @@ export function getSubredditFromUrl() {
   return null;
 }
 
+/** Whether `name` is blacklisted (removed from history and not restored). */
+export function isBlocked(name) {
+  return loadSettings().blocked.includes(String(name).toLowerCase());
+}
+
+/**
+ * Record a visit.
+ *
+ * A blacklisted subreddit is deliberately NOT recorded: the user removed it from
+ * history, and "never tracked again" is what that means. This is the single point
+ * that enforces it, so it holds for both the initial page load and SPA
+ * navigation.
+ */
 export function trackVisit(name) {
+  if (isBlocked(name)) return;
   const data = loadData();
   // Remove if already in recent (will re-add at top)
   data.recent = data.recent.filter((s) => s.name !== name);
@@ -41,4 +55,44 @@ export function togglePin(name, refresh) {
   }
   saveData(data);
   refresh(data);
+}
+
+/**
+ * Remove a subreddit from history AND blacklist it, then refresh every mounted
+ * instance.
+ *
+ * Both halves matter: dropping the row alone would let the very next visit put it
+ * straight back, so the blacklist is what makes the removal stick. Only the
+ * Recent list is touched — a pinned subreddit is not in `recent` anyway, and
+ * unpinning is the pin button's job. No confirmation is asked for; history is
+ * cheap to rebuild by un-blocking the subreddit in settings.
+ *
+ * The cached icon is deliberately left alone: it is a pure lookup keyed by name,
+ * so a restore renders its icon with no fetch at all.
+ */
+export function removeVisit(name, refresh) {
+  const key = String(name).toLowerCase();
+  const data = loadData();
+  data.recent = data.recent.filter((s) => s.name !== key);
+  saveData(data);
+
+  // Blacklist it, unless it is already there (so the list cannot accumulate
+  // duplicates).
+  const s = loadSettings();
+  if (!s.blocked.includes(key)) {
+    s.blocked.push(key);
+    saveSettings(s);
+  }
+
+  refresh(data);
+}
+
+/** Un-blacklist a subreddit so it can be tracked again, then refresh. */
+export function unblock(name, refresh) {
+  const key = String(name).toLowerCase();
+  const s = loadSettings();
+  const next = s.blocked.filter((b) => b !== key);
+  if (next.length === s.blocked.length) return;
+  saveSettings({ ...s, blocked: next });
+  refresh(loadData());
 }

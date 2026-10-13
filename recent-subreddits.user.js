@@ -96,7 +96,7 @@
     }
   }
   var SETTINGS_KEY = "recentSubredditsSettings";
-  var DEFAULT_SETTINGS = { hotkey: "Alt+Shift+R", targets: [] };
+  var DEFAULT_SETTINGS = { hotkey: "Alt+Shift+R", targets: [], blocked: [] };
   var TARGET_MODES = ["hook", "replace", "prepend", "append"];
   var TARGET_EVENTS = ["hover", "click", "both"];
   var hookTargetsCache = null;
@@ -118,17 +118,28 @@
     }
     return out;
   }
+  function normalizeBlocked(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const name of raw) {
+      if (typeof name !== "string") continue;
+      const n = name.trim().toLowerCase();
+      if (n && !out.includes(n)) out.push(n);
+    }
+    return out;
+  }
   function loadSettings() {
     try {
       const raw = GM_getValue(SETTINGS_KEY, null);
-      if (!raw) return { hotkey: DEFAULT_SETTINGS.hotkey, targets: [] };
+      if (!raw) return { ...DEFAULT_SETTINGS, targets: [], blocked: [] };
       const parsed = JSON.parse(raw);
       return {
         hotkey: typeof parsed.hotkey === "string" && parsed.hotkey.trim() ? parsed.hotkey.trim() : DEFAULT_SETTINGS.hotkey,
-        targets: normalizeTargets(parsed.targets)
+        targets: normalizeTargets(parsed.targets),
+        blocked: normalizeBlocked(parsed.blocked)
       };
     } catch {
-      return { hotkey: DEFAULT_SETTINGS.hotkey, targets: [] };
+      return { ...DEFAULT_SETTINGS, targets: [], blocked: [] };
     }
   }
   function saveSettings(settings) {
@@ -485,6 +496,28 @@
       transition: opacity 0.15s;
     }
     .rs-pin-btn:hover, .rs-unpin-btn:hover { opacity: 1; }
+    /* The trash sits next to the pin and matches it, so a row's controls read as
+       one group. Recent rows only \u2014 the Pinned section uses the \u2715 above. */
+    .rs-remove-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px;
+      font-size: 12px;
+      /* Two things are load-bearing here, both verified by rendering the variants
+         side by side on a dark background:
+         - the colour must be SET. The pin gets away with inheriting because it is
+           an emoji and renders in its own colours, but the trash is a monochrome
+           glyph, so unset it inherits whatever the host page uses.
+         - it must be the full text colour, not the muted token: as a thin outline
+           glyph the muted one measured as borderline/invisible against a dark
+           background. The VS16 emoji variant (which would match the pin's weight)
+           is not an option \u2014 it renders as tofu on Windows.
+         Hover turns it red, so the destructive action is explicit. */
+      color: var(--rs-text);
+      transition: color 0.15s;
+    }
+    .rs-remove-btn:hover { color: var(--rs-error); }
     .rs-empty {
       color: var(--rs-text-muted);
       font-style: italic;
@@ -617,7 +650,11 @@
     }
     return null;
   }
+  function isBlocked(name) {
+    return loadSettings().blocked.includes(String(name).toLowerCase());
+  }
   function trackVisit(name) {
+    if (isBlocked(name)) return;
     const data = loadData();
     data.recent = data.recent.filter((s) => s.name !== name);
     data.recent.unshift({
@@ -637,6 +674,26 @@
     }
     saveData(data);
     refresh(data);
+  }
+  function removeVisit(name, refresh) {
+    const key = String(name).toLowerCase();
+    const data = loadData();
+    data.recent = data.recent.filter((s2) => s2.name !== key);
+    saveData(data);
+    const s = loadSettings();
+    if (!s.blocked.includes(key)) {
+      s.blocked.push(key);
+      saveSettings(s);
+    }
+    refresh(data);
+  }
+  function unblock(name, refresh) {
+    const key = String(name).toLowerCase();
+    const s = loadSettings();
+    const next = s.blocked.filter((b) => b !== key);
+    if (next.length === s.blocked.length) return;
+    saveSettings({ ...s, blocked: next });
+    refresh(loadData());
   }
 
   // src/icons.js
@@ -858,6 +915,7 @@
         html += `<a href="/r/${encodeURIComponent(sub.name)}" class="rs-link">r/${sub.name}</a>`;
         html += `<span class="rs-time">${timeAgo}</span>`;
         html += `<button class="rs-pin-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Pin">\u{1F4CC}</button>`;
+        html += `<button class="rs-remove-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Remove from history">\u{1F5D1}</button>`;
         html += `</li>`;
       }
       html += "</ul></div>";
@@ -1068,6 +1126,16 @@
               </div>
             </li>`;
     }).join("") : '<li class="rs-empty">No page targets yet.</li>';
+    const blockedRows = settings.blocked.length ? settings.blocked.map(
+      (name, i) => `
+            <li class="rs-target">
+              <code class="rs-target-sel" title="${escAttr(name)}">r/${escAttr(name)}</code>
+              <div class="rs-target-controls">
+                <span class="rs-muted">Blocked</span>
+                <button class="rs-icon-btn" data-role="unblock" data-index="${i}" title="Restore">\u2715</button>
+              </div>
+            </li>`
+    ).join("") : '<li class="rs-empty">Nothing blocked.</li>';
     panel.innerHTML = `
     <div class="rs-field">
       <label class="rs-label">Open popup hotkey</label>
@@ -1086,6 +1154,13 @@
       <div class="rs-hint">Pick an element on the page, then choose what it does.
         A hook opens the popup; the others render the list inline there.</div>
       <ul class="rs-targets">${targetRows}</ul>
+    </div>
+
+    <div class="rs-field">
+      <label class="rs-label">Blocked subreddits</label>
+      <div class="rs-hint">Removed from history with the \u{1F5D1} button. They are not
+        tracked again until you restore them here.</div>
+      <ul class="rs-targets rs-blocked-list">${blockedRows}</ul>
     </div>
 
     <div class="rs-status"></div>
@@ -1175,6 +1250,17 @@
       const role = sel.dataset.role;
       updateTarget(index, role === "mode" ? { mode: sel.value } : { events: sel.value });
       say("Target updated.");
+    });
+    panel.querySelector(".rs-blocked-list").addEventListener("click", (e) => {
+      const btn = e.target.closest('[data-role="unblock"]');
+      if (!btn) return;
+      e.stopPropagation();
+      const s = loadSettings();
+      const name = s.blocked[Number(btn.dataset.index)];
+      if (!name) return;
+      ctl2.unblock(name);
+      ctl2.rerender(host);
+      say(`r/${name} restored \u2014 it will be tracked again.`);
     });
     panel.querySelector('[data-role="reset"]').addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1324,6 +1410,12 @@
         ctl.togglePin(pin.dataset.name);
         return;
       }
+      const remove = e.target.closest(".rs-remove-btn");
+      if (remove) {
+        e.stopPropagation();
+        ctl.removeVisit(remove.dataset.name);
+        return;
+      }
       if (e.target.closest(".rs-close-btn")) {
         e.stopPropagation();
         removeTargetBySelector(target.selector);
@@ -1397,6 +1489,7 @@
     isPopupVisible,
     togglePopup,
     applyTargets,
+    unblock: unblock2,
     // A setter, not a function reference: the panel replaces the active combo.
     setActiveHotkey: (combo) => {
       activeHotkey = combo;
@@ -1411,6 +1504,12 @@
   }
   function togglePin2(name) {
     togglePin(name, refreshAll);
+  }
+  function removeVisit2(name) {
+    removeVisit(name, refreshAll);
+  }
+  function unblock2(name) {
+    unblock(name, refreshAll);
   }
   function buildPopupShell() {
     const popup = document.createElement("div");
@@ -1492,6 +1591,7 @@
       buildPopupShell,
       render: renderContent2,
       togglePin: togglePin2,
+      removeVisit: removeVisit2,
       setSettingsOpen
     });
     if (!sidebarEl) {
@@ -1513,6 +1613,12 @@
       if (pin) {
         e.stopPropagation();
         togglePin2(pin.dataset.name);
+        return;
+      }
+      const remove = e.target.closest(".rs-remove-btn");
+      if (remove) {
+        e.stopPropagation();
+        removeVisit2(remove.dataset.name);
         return;
       }
       if (e.target.closest(".rs-close-btn")) {
