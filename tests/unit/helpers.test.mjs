@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path';
 import { parseHotkey, hotkeyMatches, comboFromEvent } from '../../src/hotkey.js';
 import { formatTimeAgo } from '../../src/time.js';
 import { getSubredditFromUrl } from '../../src/visits.js';
+import { ICON_MAX_ATTEMPTS, ICON_RETRY_DELAYS } from '../../src/icons.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUILT = join(HERE, '..', '..', 'recent-subreddits.user.js');
@@ -169,5 +170,37 @@ describe('hotkey parsing', () => {
       comboFromEvent({ key: 'Shift', ctrlKey: false, altKey: false, shiftKey: true, metaKey: false }),
       null
     );
+  });
+});
+
+describe('icon retry policy', () => {
+  // The e2e suite proves the retry happens; these pin the shape of the policy,
+  // because the 5-minute cap release is far too slow to wait out in a browser.
+
+  test('every failure gets a backoff delay, and the cap is reachable', () => {
+    // recordFailure() indexes ICON_RETRY_DELAYS by attempt number and falls back
+    // to the last value. If the array were shorter than the cap, the last
+    // attempts would silently share one delay.
+    assert.ok(
+      ICON_RETRY_DELAYS.length >= ICON_MAX_ATTEMPTS - 1,
+      `expected a delay per retry: ${ICON_RETRY_DELAYS.length} delays for ${ICON_MAX_ATTEMPTS} attempts`
+    );
+    for (const d of ICON_RETRY_DELAYS) {
+      assert.ok(typeof d === 'number' && d > 0, `delays must be positive, got ${d}`);
+    }
+  });
+
+  test('the delays increase, so a blocked subreddit is not hammered', () => {
+    for (let i = 1; i < ICON_RETRY_DELAYS.length; i++) {
+      assert.ok(
+        ICON_RETRY_DELAYS[i] > ICON_RETRY_DELAYS[i - 1],
+        `delay ${i} must be longer than ${i - 1}: ${JSON.stringify(ICON_RETRY_DELAYS)}`
+      );
+    }
+  });
+
+  test('more than one attempt is allowed before giving up', () => {
+    // A single attempt is the old bug: one 403 and the row is grey forever.
+    assert.ok(ICON_MAX_ATTEMPTS > 1, `must retry at least once, got ${ICON_MAX_ATTEMPTS}`);
   });
 });

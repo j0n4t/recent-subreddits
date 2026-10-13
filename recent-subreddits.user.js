@@ -660,7 +660,15 @@
 
   // src/icons.js
   var DEFAULT_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%23b8b8b8'/%3E%3C/svg%3E";
+  var ICON_MAX_ATTEMPTS = 4;
+  var ICON_RETRY_DELAYS = [800, 2e3, 4e3];
+  var ICON_REQUEST_GAP = 120;
+  var ICON_FAILURE_RESET = 5 * 6e4;
   var iconCache = {};
+  var iconFailures = {};
+  var iconQueue = [];
+  var iconInFlight = /* @__PURE__ */ new Set();
+  var iconPumpRunning = false;
   function escAttr(s) {
     return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   }
@@ -675,29 +683,82 @@
       if (img.dataset.name === encoded) img.src = icon;
     });
   }
-  function fetchSubredditIcon(name, isMounted) {
-    if (name in iconCache) return iconCache[name];
-    iconCache[name] = DEFAULT_ICON;
+  function recordFailure(name, isMounted) {
+    const prev = iconFailures[name];
+    const attempts = (prev ? prev.attempts : 0) + 1;
+    const delay = ICON_RETRY_DELAYS[attempts - 1] ?? ICON_RETRY_DELAYS[ICON_RETRY_DELAYS.length - 1];
+    iconFailures[name] = {
+      attempts,
+      nextTryAt: Date.now() + delay,
+      firstFailedAt: prev ? prev.firstFailedAt : Date.now()
+    };
+    if (attempts < ICON_MAX_ATTEMPTS) {
+      setTimeout(() => queueIcon(name, isMounted), delay);
+    }
+  }
+  function shouldQueue(name) {
+    if (iconCache[name]) return false;
+    if (iconInFlight.has(name)) return false;
+    if (iconQueue.includes(name)) return false;
+    const f = iconFailures[name];
+    if (!f) return true;
+    if (f.attempts >= ICON_MAX_ATTEMPTS) {
+      if (Date.now() - f.firstFailedAt < ICON_FAILURE_RESET) return false;
+      delete iconFailures[name];
+      return true;
+    }
+    return Date.now() >= f.nextTryAt;
+  }
+  function requestIcon(name, isMounted) {
+    iconInFlight.add(name);
     GM_xmlhttpRequest({
       method: "GET",
       url: `https://www.reddit.com/r/${encodeURIComponent(name)}/about.json`,
       headers: { Accept: "application/json" },
       onload(res) {
+        iconInFlight.delete(name);
         let icon = "";
-        try {
-          const data = JSON.parse(res.responseText);
-          icon = data.data?.icon_img || data.data?.community_icon || "";
-        } catch {
+        if (res.status === 200) {
+          try {
+            const data = JSON.parse(res.responseText);
+            icon = data.data?.icon_img || data.data?.community_icon || "";
+          } catch {
+          }
+          icon = icon.replace(/&amp;/g, "&");
         }
-        icon = icon.replace(/&amp;/g, "&");
-        iconCache[name] = icon || DEFAULT_ICON;
-        updateIconInDom(name, iconCache[name], isMounted);
+        if (icon) {
+          iconCache[name] = icon;
+          delete iconFailures[name];
+          updateIconInDom(name, icon, isMounted);
+          return;
+        }
+        recordFailure(name, isMounted);
       },
       onerror() {
-        iconCache[name] = DEFAULT_ICON;
+        iconInFlight.delete(name);
+        recordFailure(name, isMounted);
       }
     });
-    return DEFAULT_ICON;
+  }
+  function pumpIconQueue(isMounted) {
+    if (iconPumpRunning) return;
+    const next = iconQueue.shift();
+    if (!next) return;
+    iconPumpRunning = true;
+    requestIcon(next, isMounted);
+    setTimeout(() => {
+      iconPumpRunning = false;
+      pumpIconQueue(isMounted);
+    }, ICON_REQUEST_GAP);
+  }
+  function queueIcon(name, isMounted) {
+    if (!shouldQueue(name)) return;
+    iconQueue.push(name);
+    pumpIconQueue(isMounted);
+  }
+  function fetchSubredditIcon(name, isMounted) {
+    queueIcon(name, isMounted);
+    return cachedIcon(name);
   }
 
   // src/content.js

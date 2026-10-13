@@ -19,6 +19,9 @@
       ?seed=<base64 utf8 JSON>   initial GM store value for "recentSubreddits"
       ?settings=<base64 JSON>    initial GM store value for "recentSubredditsSettings"
       ?iconDelay=<ms>            latency of the stubbed icon fetch
+      ?iconFail=<name:tries,...> the first N icon fetches for a subreddit answer
+                                 with a real 403 + HTML body (which is what reddit
+                                 does under rate limiting), then succeed
   -->
   <header id="site-header">
     <a href="/" id="logo" data-testid="top-nav-logo"><span id="logo-glyph">R</span></a>
@@ -53,6 +56,17 @@
     const seed = params.get('seed');
     const iconDelay = Number(params.get('iconDelay') || 5);
 
+    // ?iconFail=javascript:1,linux:2 — the first N fetches for that subreddit
+    // answer with a real 403 + HTML body, exactly as reddit does when it rate
+    // limits an about.json request. Later attempts succeed, so a retry is
+    // observable. This is the shape of the live bug: the failure is transient.
+    const iconFail = new Map();
+    for (const entry of (params.get('iconFail') || '').split(',')) {
+      const [name, tries] = entry.split(':');
+      if (name && tries) iconFail.set(name, Number(tries));
+    }
+    window.__iconAttempts = {};
+
     const store = {};
     if (seed) {
       const bin = atob(seed);
@@ -67,6 +81,7 @@
 
     window.__store = store;
     window.__xhrCalls = [];
+    window.__xhrTimes = [];
     window.__errors = [];
     window.__warns = [];
 
@@ -95,11 +110,27 @@
 
     window.GM_xmlhttpRequest = (opts) => {
       window.__xhrCalls.push(opts.url);
+      window.__xhrTimes.push(Date.now());
       const m = String(opts.url).match(/\/r\/([^/]+)\/about\.json/);
       const name = m ? decodeURIComponent(m[1]) : 'unknown';
+      window.__iconAttempts[name] = (window.__iconAttempts[name] || 0) + 1;
+      const attempt = window.__iconAttempts[name];
+      const failFor = iconFail.get(name) || 0;
       setTimeout(() => {
         try {
+          if (attempt <= failFor) {
+            // A real 403: an HTML error page, not JSON. This is what reddit
+            // actually returns under rate limiting, and it is why the status
+            // code — not a JSON parse failure — has to be what the script reads.
+            opts.onload({
+              status: 403,
+              responseText: '<!DOCTYPE html><html><body class=theme-beta>' +
+                '<div>You\'ve been blocked by network security.</div></body></html>',
+            });
+            return;
+          }
           opts.onload({
+            status: 200,
             responseText: JSON.stringify({
               data: { icon_img: 'https://icons.test/' + name + '.png', community_icon: '' },
             }),

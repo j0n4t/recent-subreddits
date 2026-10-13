@@ -19,9 +19,10 @@ const browserPath = findBrowser();
 const skip = browserPath ? false : 'no Chromium found (set E2E_BROWSER to override)';
 
 /** Build the fixture URL with a seeded GM store. */
-function fixtureUrl(seed, iconDelay = 5) {
+function fixtureUrl(seed, iconDelay = 5, iconFail = null) {
   const b64 = Buffer.from(JSON.stringify(seed), 'utf8').toString('base64');
-  return `${FIXTURE}?seed=${encodeURIComponent(b64)}&iconDelay=${iconDelay}`;
+  const fail = iconFail ? `&iconFail=${encodeURIComponent(iconFail)}` : '';
+  return `${FIXTURE}?seed=${encodeURIComponent(b64)}&iconDelay=${iconDelay}${fail}`;
 }
 
 /** A `settings=` query value: base64 of the JSON, matching the fixture's parser. */
@@ -111,8 +112,8 @@ describe('recent-subreddits sidebar', { skip }, () => {
   });
 
   /** Fresh page per test: no cross-test state, no storage bleed. */
-  async function open(seed = DEFAULT_SEED, iconDelay = 5) {
-    await b.goto(fixtureUrl(seed, iconDelay));
+  async function open(seed = DEFAULT_SEED, iconDelay = 5, iconFail = null) {
+    await b.goto(fixtureUrl(seed, iconDelay, iconFail));
     await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
     return b;
   }
@@ -261,6 +262,76 @@ describe('recent-subreddits sidebar', { skip }, () => {
       await b.evaluate(`window.__xhrCalls.length`),
       pairs.length,
       'exactly one request per distinct subreddit (no duplicate fetches)'
+    );
+  });
+
+  test('REGRESSION: a transient icon 403 is retried, not cached as a grey circle', async () => {
+    // Live reddit answers about.json with a 403 + an HTML body ("blocked by
+    // network security") under rate limiting — measured per-subreddit and
+    // time-varying. The old code read no status, so the HTML failed JSON.parse,
+    // the catch swallowed it, and the placeholder was cached FOREVER: the icon
+    // stayed a grey circle for the life of the page and no later render retried
+    // it. That is the bug this pins down.
+    await open(DEFAULT_SEED, 5, 'javascript:1,linux:2');
+
+    await b.waitUntil(
+      `Array.from(document.querySelectorAll('.rs-icon')).every(i => i.getAttribute('src').startsWith('https://icons.test/'))`,
+      'every icon to recover after a transient 403',
+      25000
+    );
+
+    const state = await b.evaluate(`(() => ({
+      attempts: window.__iconAttempts,
+      srcs: Array.from(document.querySelectorAll('.rs-icon')).map(i => ({
+        name: decodeURIComponent(i.dataset.name),
+        src: i.getAttribute('src'),
+      })),
+    }))()`);
+
+    // Retried: the failing subreddits got extra attempts...
+    assert.ok(
+      state.attempts.javascript >= 2,
+      `r/javascript should have been retried after its 403, got ${JSON.stringify(state.attempts)}`
+    );
+    assert.ok(
+      state.attempts.linux >= 3,
+      `r/linux should have been retried twice after two 403s, got ${JSON.stringify(state.attempts)}`
+    );
+    // ...while a subreddit that succeeded on the first try was not re-fetched.
+    assert.equal(
+      state.attempts.webdev,
+      1,
+      `a subreddit that succeeded must not be re-fetched, got ${JSON.stringify(state.attempts)}`
+    );
+
+    // And it recovered to the REAL icon, not the placeholder.
+    for (const { name, src } of state.srcs) {
+      assert.equal(src, `https://icons.test/${name}.png`, `icon for ${name} never recovered`);
+    }
+  });
+
+  test('icon requests are serialized, not fired as a burst', async () => {
+    // Live reddit rate-limits about.json, so one request per row all at once is
+    // what provokes the 403s in the first place. Requests must be spaced out.
+    await open(DEFAULT_SEED, 5);
+
+    await b.waitUntil(
+      `Array.from(document.querySelectorAll('.rs-icon')).every(i => i.getAttribute('src').startsWith('https://icons.test/'))`,
+      'all icons to load',
+      20000
+    );
+
+    const timing = await b.evaluate(`(() => {
+      const t = window.__xhrTimes || [];
+      const gaps = [];
+      for (let i = 1; i < t.length; i++) gaps.push(Math.round(t[i] - t[i - 1]));
+      return { count: t.length, gaps, minGap: gaps.length ? Math.min(...gaps) : null };
+    })()`);
+
+    assert.ok(timing.count > 1, `expected several icon requests, got ${timing.count}`);
+    assert.ok(
+      timing.minGap >= 50,
+      `icon requests must be spaced apart, got gaps ${JSON.stringify(timing.gaps)}`
     );
   });
 
