@@ -97,6 +97,22 @@ export function findBrowser() {
   return null;
 }
 
+/**
+ * Serialise a real function + args for evaluate().
+ *
+ * The function body is real code in the test file — lintable, typecheckable,
+ * no manual escaping. The harness converts it to a string and evaluates it
+ * in the page with the args passed as JSON.
+ *
+ *   const width = await b.evaluate(run((sel) => {
+ *     const el = document.querySelector(sel);
+ *     return el ? el.getBoundingClientRect().width : null;
+ *   }, '#pick-target'));
+ */
+export function run(fn, ...args) {
+  return { __run: fn.toString(), __args: args };
+}
+
 export class Browser {
   constructor(proc, ws, userDataDir, cdpPort) {
     this.proc = proc;
@@ -286,8 +302,15 @@ export class Browser {
   /** Evaluate in the page. Throws on exceptionDetails so a throwing expression
    *  is not mistaken for "the app did not update". */
   async evaluate(expression) {
+    let expr;
+    if (expression && typeof expression === 'object' && '__run' in expression) {
+      const { __run, __args } = expression;
+      expr = `(${__run})(...${JSON.stringify(__args)})`;
+    } else {
+      expr = expression;
+    }
     const res = await this.session('Runtime.evaluate', {
-      expression,
+      expression: expr,
       awaitPromise: true,
       returnByValue: true,
     });

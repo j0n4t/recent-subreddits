@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { Browser, findBrowser } from './cdp-harness.mjs';
+import { Browser, findBrowser, run } from './cdp-harness.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = pathToFileURL(join(HERE, '..', 'fixtures', 'reddit-mock.html')).href;
@@ -1973,5 +1973,16 @@ describe('recent-subreddits sidebar', { skip }, () => {
       [],
       'a normal page must stay silent in the console'
     );
+  });
+
+  test('run() serialises a real function for evaluate', async () => {
+    await open();
+    // Use run() instead of a template literal — the function body is real code.
+    const selector = '#logo';
+    const width = await b.evaluate(run((sel) => {
+      const el = document.querySelector(sel);
+      return el ? el.getBoundingClientRect().width : null;
+    }, selector));
+    assert.ok(width > 0, 'the logo element must have a positive width');
   });
 });
