@@ -8,6 +8,7 @@ import {
 import { checkTriggers } from './diagnostics.js';
 import { injectStyles } from './styles.js';
 import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore } from './visits.js';
+import { harvestCurrentSubredditIcon } from './icons.js';
 import { positionPopup, positionPopupCentered } from './position.js';
 import { renderContent as renderContentInto } from './content.js';
 import { renderSettingsPanel } from './settings-panel.js';
@@ -112,6 +113,20 @@ function renderContent(data, instance) {
   renderContentInto(data, instance || popupEl, () => !!sidebarEl);
 }
 
+/**
+ * Take the current subreddit's icon off the page, then repaint if it changed.
+ *
+ * Called before the first render, on SPA navigation, and whenever the popup
+ * opens. It must run BEFORE a render, not after: the render queues the fallback
+ * fetches, and an icon already harvested is one that never needs fetching.
+ * Safe to call before the popup exists — the icon is recorded either way, and
+ * there is simply nothing to repaint yet.
+ */
+function harvestIcon() {
+  if (!harvestCurrentSubredditIcon(() => !!sidebarEl)) return;
+  if (sidebarEl) renderContent(loadData());
+}
+
 function setSettingsOpen(open, instance) {
   const host = instance || popupEl;
   if (!host) return;
@@ -140,6 +155,9 @@ function togglePopup(show, trigger) {
     // Remember the anchor so re-opening after a pick lands in the same place
     // instead of snapping to the centre.
     if (trigger) lastTrigger = trigger;
+    // Whatever the page can tell us about the current subreddit's icon is free;
+    // take it before showing the list.
+    harvestIcon();
     popupEl.classList.add('visible');
     if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(popupEl, lastTrigger);
     else positionPopupCentered(popupEl);
@@ -188,6 +206,10 @@ function mountSidebar() {
     sidebarEl.appendChild(popupEl);
     activeHotkey = parseHotkey(loadSettings().hotkey);
 
+    // Harvest before the first render: the render queues a fallback fetch for
+    // every unresolved row, so an icon already on the page must be recorded first
+    // or it gets fetched anyway.
+    harvestIcon();
     renderContent(loadData());
     // Mount any configured inline blocks on this page.
     applyTargets();
@@ -309,6 +331,11 @@ function observeNavigation() {
       if (subName) {
         trackVisit(subName);
       }
+      // The page may already be showing the new subreddit's icon. Reddit
+      // re-renders that anchor a beat after the URL changes (measured ~1s), so
+      // harvestIcon() is also called when the popup opens, which is the read
+      // that actually lands after the new icon exists.
+      harvestIcon();
       renderContent(loadData());
       // The new view replaced the DOM: inline hosts may be gone, and the new
       // view may have elements matching targets that were absent before.
@@ -335,6 +362,9 @@ function init() {
 
   mountSidebar();
   observeNavigation();
+  // The page may already be showing this subreddit's icon: adopt it now, so the
+  // very first render has it without any fetch.
+  harvestIcon();
 }
 
 // Wait for DOM to be ready

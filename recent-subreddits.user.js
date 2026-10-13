@@ -70,6 +70,31 @@
   function saveData(data) {
     GM_setValue(STORAGE_KEY, JSON.stringify(data));
   }
+  var ICONS_KEY = "recentSubredditsIcons";
+  var MAX_ICONS = 200;
+  function loadIcons() {
+    try {
+      const raw = GM_getValue(ICONS_KEY, null);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const out = {};
+      for (const [name, url] of Object.entries(parsed)) {
+        if (typeof name === "string" && name && typeof url === "string" && url) out[name] = url;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+  function saveIcons(icons) {
+    try {
+      const entries = Object.entries(icons);
+      const trimmed = entries.length > MAX_ICONS ? entries.slice(-MAX_ICONS) : entries;
+      GM_setValue(ICONS_KEY, JSON.stringify(Object.fromEntries(trimmed)));
+    } catch {
+    }
+  }
   var SETTINGS_KEY = "recentSubredditsSettings";
   var DEFAULT_SETTINGS = { hotkey: "Alt+Shift+R", targets: [] };
   var TARGET_MODES = ["hook", "replace", "prepend", "append"];
@@ -614,58 +639,16 @@
     refresh(data);
   }
 
-  // src/position.js
-  var POPUP_WIDTH = 280;
-  var GAP = 8;
-  var MARGIN = 16;
-  function positionPopup(popup, trigger) {
-    const rect = trigger.getBoundingClientRect();
-    const popupHeight = popup.offsetHeight || 300;
-    let left = rect.left;
-    if (left + POPUP_WIDTH > window.innerWidth - MARGIN) {
-      left = window.innerWidth - POPUP_WIDTH - MARGIN;
-    }
-    if (left < MARGIN) left = MARGIN;
-    let top = rect.bottom + GAP;
-    if (top + popupHeight > window.innerHeight - MARGIN) {
-      const aboveTop = rect.top - popupHeight - GAP;
-      if (aboveTop >= MARGIN) {
-        top = aboveTop;
-      } else {
-        top = Math.max(MARGIN, Math.min(top, window.innerHeight - popupHeight - MARGIN));
-      }
-    }
-    popup.style.left = left + "px";
-    popup.style.top = top + "px";
-  }
-  function positionPopupCentered(popup) {
-    const height = popup.offsetHeight || 300;
-    const left = Math.max(MARGIN, Math.round((window.innerWidth - POPUP_WIDTH) / 2));
-    const top = Math.max(MARGIN, Math.round((window.innerHeight - height) / 2));
-    popup.style.left = left + "px";
-    popup.style.top = top + "px";
-  }
-
-  // src/time.js
-  function formatTimeAgo(timestamp) {
-    const seconds = Math.floor((Date.now() - timestamp) / 1e3);
-    if (seconds < 60) return "just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  }
-
   // src/icons.js
   var DEFAULT_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%23b8b8b8'/%3E%3C/svg%3E";
-  var ICON_MAX_ATTEMPTS = 4;
-  var ICON_RETRY_DELAYS = [800, 2e3, 4e3];
+  var ICON_MAX_ATTEMPTS = 3;
+  var ICON_RETRY_DELAYS = [800, 2e3];
   var ICON_REQUEST_GAP = 120;
   var ICON_FAILURE_RESET = 5 * 6e4;
-  var iconCache = {};
+  var ICON_HOST = /^https:\/\/[a-z0-9.-]*\.?redditmedia\.com\//i;
+  var iconCache = loadIcons();
   var iconFailures = {};
+  var iconUrlOwner = {};
   var iconQueue = [];
   var iconInFlight = /* @__PURE__ */ new Set();
   var iconPumpRunning = false;
@@ -674,6 +657,44 @@
   }
   function cachedIcon(name) {
     return iconCache[name] || DEFAULT_ICON;
+  }
+  function readCurrentSubredditIcon() {
+    const el = document.getElementById("subreddit-icon-img");
+    if (!el) return null;
+    const img = el.tagName === "IMG" ? el : el.querySelector("img");
+    let src = img ? img.getAttribute("src") : null;
+    if (!src) {
+      const carrier = el.querySelector('[style*="background-image"]') || el;
+      const style = carrier.getAttribute && carrier.getAttribute("style");
+      const bg = style ? /url\(["']?(.*?)["']?\)/.exec(style) : null;
+      if (bg) src = bg[1];
+    }
+    if (!src || !ICON_HOST.test(src)) return null;
+    return src;
+  }
+  function currentSubredditName() {
+    const header = document.querySelector("shreddit-subreddit-header[name]");
+    if (!header) return null;
+    const name = (header.getAttribute("name") || "").trim().toLowerCase();
+    return name || null;
+  }
+  function recordIcon(name, icon, isMounted) {
+    iconCache[name] = icon;
+    iconUrlOwner[icon] = name;
+    delete iconFailures[name];
+    saveIcons(iconCache);
+    updateIconInDom(name, icon, isMounted);
+  }
+  function harvestCurrentSubredditIcon(isMounted) {
+    const icon = readCurrentSubredditIcon();
+    if (!icon) return false;
+    const name = currentSubredditName();
+    if (!name) return false;
+    const owner = iconUrlOwner[icon];
+    if (owner && owner !== name) return false;
+    if (iconCache[name] === icon) return false;
+    recordIcon(name, icon, isMounted);
+    return true;
   }
   function updateIconInDom(name, icon, isMounted) {
     if (!isMounted() || !icon) return;
@@ -727,9 +748,7 @@
           icon = icon.replace(/&amp;/g, "&");
         }
         if (icon) {
-          iconCache[name] = icon;
-          delete iconFailures[name];
-          updateIconInDom(name, icon, isMounted);
+          recordIcon(name, icon, isMounted);
           return;
         }
         recordFailure(name, isMounted);
@@ -759,6 +778,50 @@
   function fetchSubredditIcon(name, isMounted) {
     queueIcon(name, isMounted);
     return cachedIcon(name);
+  }
+
+  // src/position.js
+  var POPUP_WIDTH = 280;
+  var GAP = 8;
+  var MARGIN = 16;
+  function positionPopup(popup, trigger) {
+    const rect = trigger.getBoundingClientRect();
+    const popupHeight = popup.offsetHeight || 300;
+    let left = rect.left;
+    if (left + POPUP_WIDTH > window.innerWidth - MARGIN) {
+      left = window.innerWidth - POPUP_WIDTH - MARGIN;
+    }
+    if (left < MARGIN) left = MARGIN;
+    let top = rect.bottom + GAP;
+    if (top + popupHeight > window.innerHeight - MARGIN) {
+      const aboveTop = rect.top - popupHeight - GAP;
+      if (aboveTop >= MARGIN) {
+        top = aboveTop;
+      } else {
+        top = Math.max(MARGIN, Math.min(top, window.innerHeight - popupHeight - MARGIN));
+      }
+    }
+    popup.style.left = left + "px";
+    popup.style.top = top + "px";
+  }
+  function positionPopupCentered(popup) {
+    const height = popup.offsetHeight || 300;
+    const left = Math.max(MARGIN, Math.round((window.innerWidth - POPUP_WIDTH) / 2));
+    const top = Math.max(MARGIN, Math.round((window.innerHeight - height) / 2));
+    popup.style.left = left + "px";
+    popup.style.top = top + "px";
+  }
+
+  // src/time.js
+  function formatTimeAgo(timestamp) {
+    const seconds = Math.floor((Date.now() - timestamp) / 1e3);
+    if (seconds < 60) return "just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
   }
 
   // src/content.js
@@ -1384,6 +1447,10 @@
   function renderContent2(data, instance) {
     renderContent(data, instance || popupEl, () => !!sidebarEl);
   }
+  function harvestIcon() {
+    if (!harvestCurrentSubredditIcon(() => !!sidebarEl)) return;
+    if (sidebarEl) renderContent2(loadData());
+  }
   function setSettingsOpen(open, instance) {
     const host = instance || popupEl;
     if (!host) return;
@@ -1399,6 +1466,7 @@
     if (!popupEl) return;
     if (show) {
       if (trigger) lastTrigger = trigger;
+      harvestIcon();
       popupEl.classList.add("visible");
       if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(popupEl, lastTrigger);
       else positionPopupCentered(popupEl);
@@ -1433,6 +1501,7 @@
       popupEl = buildPopupShell();
       sidebarEl.appendChild(popupEl);
       activeHotkey = parseHotkey(loadSettings().hotkey);
+      harvestIcon();
       renderContent2(loadData());
       applyTargets();
     } else {
@@ -1522,6 +1591,7 @@
         if (subName) {
           trackVisit(subName);
         }
+        harvestIcon();
         renderContent2(loadData());
         applyTargets();
         checkTriggers();
@@ -1537,6 +1607,7 @@
     }
     mountSidebar();
     observeNavigation();
+    harvestIcon();
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);

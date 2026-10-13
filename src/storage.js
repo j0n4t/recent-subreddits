@@ -26,6 +26,48 @@ export function saveData(data) {
   GM_setValue(STORAGE_KEY, JSON.stringify(data));
 }
 
+// ---------- Icons ----------
+// Icons already resolved — harvested off a subreddit page, or fetched — are kept
+// across page loads.
+//
+// This is what makes the harvest pay off. The icon cache is in memory, so
+// without persistence it dies with every navigation and the next page re-fetches
+// every row it had already resolved (measured: 26 about.json requests across six
+// page loads, with the same four subreddits re-fetched on each one). Persisting
+// turns the fetch into the soft fallback it is meant to be: it runs only for a
+// subreddit whose icon has never been seen.
+const ICONS_KEY = 'recentSubredditsIcons';
+// The recent list is capped at MAX_RECENT, so this only matters after a long
+// session over many subreddits.
+const MAX_ICONS = 200;
+
+export function loadIcons() {
+  try {
+    const raw = GM_getValue(ICONS_KEY, null);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out = {};
+    for (const [name, url] of Object.entries(parsed)) {
+      if (typeof name === 'string' && name && typeof url === 'string' && url) out[name] = url;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function saveIcons(icons) {
+  try {
+    const entries = Object.entries(icons);
+    const trimmed = entries.length > MAX_ICONS ? entries.slice(-MAX_ICONS) : entries;
+    GM_setValue(ICONS_KEY, JSON.stringify(Object.fromEntries(trimmed)));
+  } catch {
+    // A full or unavailable store must never break rendering: the icons are
+    // still correct for this page load.
+  }
+}
+
 // ---------- Settings ----------
 const SETTINGS_KEY = 'recentSubredditsSettings';
 

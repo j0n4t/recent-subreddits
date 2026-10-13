@@ -22,6 +22,9 @@
       ?iconFail=<name:tries,...> the first N icon fetches for a subreddit answer
                                  with a real 403 + HTML body (which is what reddit
                                  does under rate limiting), then succeed
+      ?sub=<name>                the page is a subreddit view: adds reddit's own
+                                 `#subreddit-icon-img` + header, holding the icon
+                                 the harvest should adopt (no fetch needed)
   -->
   <header id="site-header">
     <a href="/" id="logo" data-testid="top-nav-logo"><span id="logo-glyph">R</span></a>
@@ -96,6 +99,37 @@
     // Reddit markup change that breaks every trigger selector.
     if (params.get('noTriggers')) {
       document.querySelector('#site-header').remove();
+    }
+
+    // ?sub=<name> — this page is a subreddit view, so reddit's own icon markup
+    // is present and the userscript should HARVEST it instead of fetching
+    // about.json. The icon URL is deliberately NOT the one the fetch stub
+    // returns, so a test can tell the two sources apart.
+    //
+    // ?subStale=<name> mirrors a view that is MID-NAVIGATION: the icon anchor
+    // still holds the previous subreddit's icon (reddit re-renders it ~1s after
+    // the URL changes), so the harvest must refuse to adopt it.
+    const sub = params.get('sub');
+    const stale = params.get('subStale');
+    window.__harvestIconUrl = sub ? 'https://styles.redditmedia.com/t5_harvest/styles/communityIcon_harvested.png' : null;
+    if (sub) {
+      const iconSpan = document.createElement('span');
+      iconSpan.id = 'subreddit-icon-img';
+      const iconImg = document.createElement('img');
+      iconImg.setAttribute('src', window.__harvestIconUrl);
+      iconSpan.appendChild(iconImg);
+      const main = document.querySelector('#content');
+      main.insertBefore(iconSpan, main.firstChild);
+
+      // The page names the subreddit it is showing. When ?subStale names a
+      // DIFFERENT subreddit, that is the mid-navigation state reddit exhibits
+      // (~1s after a subreddit-to-subreddit navigation the anchor still holds the
+      // previous subreddit's icon) — and the harvest must file the icon under the
+      // header's name, never guess from the URL.
+      const hdr = document.createElement('shreddit-subreddit-header');
+      hdr.setAttribute('name', stale || sub);
+      hdr.setAttribute('subreddit-id', 't5_harvest');
+      main.insertBefore(hdr, main.firstChild);
     }
 
     // Collected for the whole run: a handler that throws part-way aborts the rest

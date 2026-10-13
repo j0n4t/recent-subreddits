@@ -335,6 +335,94 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
   });
 
+  test('HARVEST: the current subreddit icon is adopted from the page, with no fetch', async () => {
+    // This is how reddit's own recent-communities list works: the subreddit's
+    // icon is already in the page, so there is nothing to request. The icon URL
+    // here is a distinct harvest-only URL, so adopting it can only have come
+    // from the DOM.
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&sub=javascript`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
+
+    const harvested = await b.evaluate(`(() => {
+      const img = Array.from(document.querySelectorAll('.rs-icon'))
+        .find(i => decodeURIComponent(i.dataset.name) === 'javascript');
+      return { src: img ? img.getAttribute('src') : null, harvestUrl: window.__harvestIconUrl };
+    })()`);
+    assert.equal(
+      harvested.src,
+      harvested.harvestUrl,
+      'the current subreddit icon must be adopted from the page'
+    );
+
+    // And it must NOT have been fetched: that is the whole point.
+    const fetched = await b.evaluate(
+      `window.__xhrCalls.filter(u => /\\/r\\/javascript\\/about\\.json/.test(u)).length`
+    );
+    assert.equal(fetched, 0, 'a harvested icon must not also trigger an about.json fetch');
+
+    // Other rows still need the fallback, so they do fetch.
+    assert.ok(
+      (await b.evaluate(`window.__xhrCalls.length`)) > 0,
+      'subreddits without a harvestable icon must still use the fallback'
+    );
+  });
+
+  test('HARVEST: a stale anchor is never filed under the wrong subreddit', async () => {
+    // Measured on live reddit: after a subreddit-to-subreddit navigation the URL
+    // is already the new route while the icon anchor still holds the PREVIOUS
+    // subreddit's icon for ~1s. Here the URL says r/linux while the page's header
+    // still names r/javascript — the mid-navigation state. The harvest must
+    // refuse, not guess, or r/javascript's icon lands on r/linux's row.
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&sub=linux&subStale=javascript`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
+
+    const state = await b.evaluate(`(() => {
+      const rows = Array.from(document.querySelectorAll('.rs-icon')).map(i => ({
+        name: decodeURIComponent(i.dataset.name),
+        src: i.getAttribute('src'),
+      }));
+      return { rows, harvestUrl: window.__harvestIconUrl };
+    })()`);
+
+    // The header names r/javascript, so the icon is filed there — never on
+    // r/linux's row, even though the URL says linux.
+    const javascript = state.rows.find((r) => r.name === 'javascript');
+    assert.equal(
+      javascript.src,
+      state.harvestUrl,
+      "the icon must be filed under the page's own name, not the URL"
+    );
+
+    const wrong = state.rows.filter((r) => r.name !== 'javascript' && r.src === state.harvestUrl);
+    assert.deepEqual(
+      wrong,
+      [],
+      `a stale anchor must not be filed under another subreddit, got ${JSON.stringify(wrong)}`
+    );
+  });
+
+  test('HARVEST: a foreign URL in the anchor is not adopted', async () => {
+    // The anchor is reddit's, but nothing stops a stray <img> from being the
+    // first match. Only reddit's image CDN may be adopted.
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&sub=javascript`);
+    await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
+
+    const adopted = await b.evaluate(`(() => {
+      // Poison the anchor with a non-reddit URL, then force a harvest by opening
+      // the popup (which harvests before showing).
+      const el = document.querySelector('#subreddit-icon-img img');
+      el.setAttribute('src', 'https://evil.example.com/icon.png');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+      const img = Array.from(document.querySelectorAll('.rs-icon'))
+        .find(i => decodeURIComponent(i.dataset.name) === 'javascript');
+      return img ? img.getAttribute('src') : null;
+    })()`);
+    assert.ok(
+      !String(adopted).includes('evil.example.com'),
+      `a non-redditmedia URL must never be adopted, got ${adopted}`
+    );
+  });
+
   test('close paths: outside click, close button, Escape', async () => {
     await open();
 
