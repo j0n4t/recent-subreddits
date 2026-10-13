@@ -4,7 +4,7 @@
 // whichever instance opened it (the popup or an inline block), so the instance
 // and a small controller surface are passed in rather than closed over — that
 // keeps this module free of an import cycle with the mount code.
-import { loadSettings, saveSettings, DEFAULT_SETTINGS } from './storage.js';
+import { loadSettings, saveSettings, defaultSettings, DEFAULT_SETTINGS } from './storage.js';
 import { escAttr } from './icons.js';
 import { parseHotkey, comboFromEvent } from './hotkey.js';
 import { startPicker } from './picker.js';
@@ -20,6 +20,11 @@ export function renderSettingsPanel(instance, ctl) {
   if (!panel) return;
 
   const settings = loadSettings();
+
+  // A hook is what opens the popup by hover/click. With none configured the
+  // popup is only reachable by hotkey, so the panel says so rather than leaving
+  // the user with a list that silently no longer opens anything.
+  const hasHook = settings.targets.some((t) => t.mode === 'hook');
 
   const modeOptions = (selected) =>
     [
@@ -88,6 +93,9 @@ export function renderSettingsPanel(instance, ctl) {
       <div class="rs-hint">Pick an element on the page, then choose what it does.
         A hook opens the popup; the others render the list inline there.</div>
       <ul class="rs-targets">${targetRows}</ul>
+      ${hasHook ? '' : `<div class="rs-warn">No hook configured, so hovering or
+        clicking will not open the popup. Press <b>${escAttr(settings.hotkey)}</b>
+        to open it, or add a hook above.</div>`}
     </div>
 
     <div class="rs-field">
@@ -207,7 +215,15 @@ export function renderSettingsPanel(instance, ctl) {
     ctl.rerender(host);
     // A removed target may have been an inline one — tear its block down.
     ctl.applyTargets();
-    say('Target removed.');
+    // Deleting every hook is allowed; say what that leaves you with, since the
+    // list otherwise just stops opening on hover with no explanation.
+    const hooksLeft = s.targets.some((t) => t.mode === 'hook');
+    say(
+      hooksLeft
+        ? 'Target removed.'
+        : `Target removed — no hook left, so use ${s.hotkey} to open the popup.`,
+      hooksLeft ? 'ok' : 'error'
+    );
   });
 
   panel.querySelector('.rs-targets').addEventListener('change', (e) => {
@@ -250,12 +266,14 @@ export function renderSettingsPanel(instance, ctl) {
 
   panel.querySelector('[data-role="reset"]').addEventListener('click', (e) => {
     e.stopPropagation();
-    saveSettings({ ...DEFAULT_SETTINGS });
+    // defaultSettings() carries the built-in popup trigger, so resetting puts
+    // hover/click back — it is a restore, not a wipe.
+    saveSettings(defaultSettings());
     ctl.setActiveHotkey(parseHotkey(DEFAULT_SETTINGS.hotkey));
-    // Reset clears the targets too, so the inline blocks must go.
+    // The target list changed, so inline blocks must be reconciled too.
     ctl.applyTargets();
     ctl.rerender(host);
-    say(`Reset to ${DEFAULT_SETTINGS.hotkey}.`);
+    say(`Reset — ${DEFAULT_SETTINGS.hotkey}, and the built-in trigger restored.`);
   });
 
   panel.querySelector('[data-role="done"]').addEventListener('click', (e) => {

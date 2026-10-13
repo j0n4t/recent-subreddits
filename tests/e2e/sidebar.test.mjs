@@ -25,9 +25,28 @@ function fixtureUrl(seed, iconDelay = 5, iconFail = null) {
   return `${FIXTURE}?seed=${encodeURIComponent(b64)}&iconDelay=${iconDelay}${fail}`;
 }
 
+/**
+ * The built-in popup trigger, as it ships in defaults.js. Settings seeded in a
+ * test must include it, because it is a normal settings entry now rather than a
+ * hardcoded fallback — without it, hover on the fixture's logo opens nothing.
+ */
+const BUILTIN_HOOK = {
+  selector: 'a[href="/"], #header-logo, .header-logo, [data-testid="top-nav-logo"], ' +
+    'button[aria-label*="menu" i], #TopNav button, #reddit-logo, #navbar-menu-button',
+  mode: 'hook',
+  events: 'both',
+};
+
 /** A `settings=` query value: base64 of the JSON, matching the fixture's parser. */
 function settingsParam(settings) {
-  const json = JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], ...settings });
+  const json = JSON.stringify({
+    hotkey: 'Alt+Shift+R',
+    ...settings,
+    // Seed the built-in hook only when the test does not bring its own targets.
+    // Tests that pass targets address rows by index and assert exact lists, so an
+    // extra seeded row would shift them; those open the popup by hotkey instead.
+    targets: Array.isArray(settings.targets) ? settings.targets : [BUILTIN_HOOK],
+  });
   return encodeURIComponent(Buffer.from(json, 'utf8').toString('base64'));
 }
 
@@ -848,9 +867,9 @@ describe('recent-subreddits sidebar', { skip }, () => {
     const status = await b.evaluate(`document.querySelector('.rs-status').textContent`);
     assert.match(status, /modifier/i, `expected a modifier warning, got: ${status}`);
     assert.equal(
-      await b.evaluate(`window.__store.recentSubredditsSettings || null`),
-      null,
-      'an invalid combination must not be saved'
+      JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`)).hotkey,
+      'Alt+Shift+R',
+      'an invalid combination must not replace the hotkey'
     );
   });
 
@@ -1083,7 +1102,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
     assert.deepEqual(
       stored.targets,
-      [{ selector: '#pick-target', mode: 'hook', events: 'both' }],
+      [BUILTIN_HOOK, { selector: '#pick-target', mode: 'hook', events: 'both' }],
       'the picked element must be saved as a hook target'
     );
 
@@ -1094,7 +1113,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'settings must reopen after a pick'
     );
     assert.equal(
-      await b.evaluate(`document.querySelector('.rs-target-sel').textContent`),
+      await b.evaluate(`Array.from(document.querySelectorAll('.rs-target-sel')).map(c => c.textContent).at(-1)`),
       '#pick-target',
       'the target must be listed in settings'
     );
@@ -1119,10 +1138,10 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'picker overlay to be removed by Escape'
     );
 
-    assert.equal(
-      await b.evaluate(`window.__store.recentSubredditsSettings || null`),
-      null,
-      'cancelling must not write a target'
+    assert.deepEqual(
+      JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`)).targets,
+      [BUILTIN_HOOK],
+      'cancelling must not add a target'
     );
     assert.equal(
       await b.evaluate(`document.querySelector('${POPUP}').classList.contains('settings-open')`),
@@ -1155,11 +1174,12 @@ describe('recent-subreddits sidebar', { skip }, () => {
     }
 
     const stored = JSON.parse(await b.evaluate(`window.__store.recentSubredditsSettings`));
-    assert.equal(stored.targets.length, 1, `duplicate pick must not add a second entry, got ${JSON.stringify(stored.targets)}`);
+    // One seeded built-in hook + exactly one picked entry.
+    assert.equal(stored.targets.length, 2, `duplicate pick must not add a second entry, got ${JSON.stringify(stored.targets)}`);
     assert.equal(
       await b.evaluate(`document.querySelectorAll('.rs-target').length`),
-      1,
-      'the list must show exactly one row'
+      2,
+      'the list must show the built-in hook plus the single picked row'
     );
   });
 
@@ -1292,7 +1312,9 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.waitUntil(`!document.getElementById('rs-picker-hint')`, 'picker closed');
 
     const changed = await b.evaluate(`(() => {
-      const sel = document.querySelector('[data-role="mode"]');
+      // The last row is the one just picked; the seeded built-in hook is first.
+      const sels = document.querySelectorAll('[data-role="mode"]');
+      const sel = sels[sels.length - 1];
       sel.value = 'replace';
       sel.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
@@ -1300,14 +1322,19 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.equal(changed, true);
 
     await b.waitUntil(
-      `JSON.parse(window.__store.recentSubredditsSettings).targets[0].mode === 'replace'`,
+      `JSON.parse(window.__store.recentSubredditsSettings).targets[1].mode === 'replace'`,
       'the mode change to be persisted'
     );
 
-    // A replace target has no event choice — the control is gone.
+    // A replace target has no event choice — the control is gone for that row,
+    // while the built-in hook above it still has one.
     assert.equal(
-      await b.evaluate(`document.querySelector('[data-role="events"]')`),
-      null,
+      await b.evaluate(`(() => {
+        const rows = Array.from(document.querySelectorAll('.rs-target'));
+        const last = rows[rows.length - 1];
+        return last.querySelector('[data-role="events"]') === null;
+      })()`),
+      true,
       'the events selector must not be offered for a non-hook mode'
     );
   });
@@ -1330,16 +1357,21 @@ describe('recent-subreddits sidebar', { skip }, () => {
       el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       return true;
     })()`);
-    await b.waitUntil(`document.querySelectorAll('.rs-target').length === 1`, 'target listed');
+    await b.waitUntil(`document.querySelectorAll('.rs-target').length === 2`, 'target listed');
 
-    await b.evaluate(`document.querySelector('[data-role="remove"]').click()`);
+    // Remove the picked row (the last one); the built-in hook stays.
+    await b.evaluate(`(() => {
+      const btns = document.querySelectorAll('[data-role="remove"]');
+      btns[btns.length - 1].click();
+      return true;
+    })()`);
     await b.waitUntil(
-      `JSON.parse(window.__store.recentSubredditsSettings).targets.length === 0`,
+      `JSON.parse(window.__store.recentSubredditsSettings).targets.length === 1`,
       'the removal to be persisted'
     );
     assert.equal(
       await b.evaluate(`document.querySelectorAll('.rs-target').length`),
-      0,
+      1,
       'the row must disappear'
     );
   });
@@ -1761,8 +1793,9 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'starts appended'
     );
 
-    // Open the popup's settings and change the mode there.
-    await b.evaluate(HOVER('#logo'));
+    // Open the popup's settings and change the mode there. By hotkey: this test
+    // supplies its own targets, so the seeded built-in hook is not present.
+    await b.evaluate(PRESS('Alt+Shift+r'));
     await b.waitUntil(isVisible, 'popup open');
     await b.evaluate(`document.querySelector('.recent-subreddits-popup .rs-settings-btn').click()`);
     await b.waitUntil(
@@ -1832,6 +1865,83 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.deepEqual(await b.evaluate(`window.__errors`), [], 'an invalid selector must not throw');
   });
 
+  test('the built-in trigger ships as a settings target and reset restores it', async () => {
+    // The built-in Reddit trigger used to be a hardcoded fallback. It is an
+    // ordinary settings entry now, which is what makes it visible and removable —
+    // and what makes "reset" able to put it back.
+    await open();
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open'
+    );
+
+    // It is listed, with the full built-in selector.
+    const listed = await b.evaluate(`(() => {
+      const sel = document.querySelector('.rs-target-sel');
+      return { text: sel.textContent, title: sel.title };
+    })()`);
+    assert.match(listed.title, /top-nav-logo/, 'the built-in selector must be the listed target');
+    assert.match(listed.title, /navbar-menu-button/, 'and must cover the whole combined selector');
+
+    // Delete it, then confirm the list says the popup is hotkey-only.
+    await b.evaluate(`document.querySelector('[data-role="remove"]').click()`);
+    await b.waitUntil(
+      `JSON.parse(window.__store.recentSubredditsSettings).targets.length === 0`,
+      'the built-in target to be removed'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelectorAll('.rs-target').length`),
+      0,
+      'removing it must leave no rows'
+    );
+    assert.match(
+      await b.evaluate(`document.querySelector('.rs-warn').textContent`),
+      /Alt\+Shift\+R/,
+      'with no hook, settings must point at the hotkey'
+    );
+    // Hover must genuinely stop opening the popup.
+    await b.evaluate(`document.querySelector('[data-role="done"]').click()`);
+    await b.evaluate(CLICK_BODY);
+    await b.waitUntil(`!${isVisible}`, 'popup closed');
+    await b.evaluate(HOVER('#logo'));
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(await b.evaluate(isVisible), false, 'with no hook, hovering must not open the popup');
+
+    // Reset restores it — a restore, not a wipe.
+    await b.evaluate(PRESS('Alt+Shift+r'));
+    await b.waitUntil(isVisible, 'popup reopened by hotkey');
+    await b.evaluate(`document.querySelector('.rs-settings-btn').click()`);
+    await b.waitUntil(
+      `document.querySelector('${POPUP}').classList.contains('settings-open')`,
+      'settings open again'
+    );
+    await b.evaluate(`document.querySelector('[data-role="reset"]').click()`);
+    await b.waitUntil(
+      `JSON.parse(window.__store.recentSubredditsSettings).targets.length === 1`,
+      'reset to restore a target'
+    );
+    assert.equal(
+      await b.evaluate(`document.querySelectorAll('.rs-target').length`),
+      1,
+      'reset must restore the built-in trigger row'
+    );
+    assert.equal(
+      await b.evaluate(`!!document.querySelector('.rs-warn')`),
+      false,
+      'the hotkey-only warning must be gone once a hook is restored'
+    );
+
+    // And hover works again.
+    await b.evaluate(`document.querySelector('[data-role="done"]').click()`);
+    await b.evaluate(CLICK_BODY);
+    await b.waitUntil(`!${isVisible}`, 'popup closed');
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'hover to open the popup again after reset');
+  });
+
   test('WARNS once when no trigger selector matches', async () => {
     await b.goto(`${fixtureUrl(DEFAULT_SEED)}&noTriggers=1`);
     await b.waitUntil(`!!document.querySelector('${POPUP}')`, 'popup to mount');
@@ -1841,7 +1951,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'a warning about the missing trigger'
     );
     assert.equal(warns.length, 1, `expected exactly one warning, got ${JSON.stringify(warns)}`);
-    assert.match(warns[0], /no popup trigger matched/i);
+    assert.match(warns[0], /none of the configured hooks matched/i);
     assert.match(warns[0], /recent-subreddits/, 'warning should be prefixed so it is identifiable');
 
     // Navigating must not spam the console with a repeat.

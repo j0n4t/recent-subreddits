@@ -14,6 +14,7 @@ import { renderContent as renderContentInto } from './content.js';
 import { renderSettingsPanel } from './settings-panel.js';
 import { initInline, refreshInline, applyTargets } from './inline.js';
 import { resolveTrigger, wantsHover, wantsClick } from './triggers.js';
+import { hookTargets } from './storage.js';
 
 // ---------- Build sidebar element ----------
 // Header label per view: icon + title, swapped when the settings panel opens.
@@ -331,8 +332,10 @@ function mountSidebar() {
     }
   });
 
-  // Warn (once) if no trigger matched — the signature of a Reddit markup change.
-  checkTriggers();
+  // Warn (once) if the configured hooks match nothing on this page — the
+  // signature of a Reddit markup change. Silent when no hook is configured:
+  // that is a deliberate choice, and the settings panel already says so.
+  checkTriggers(hookTargets().map((t) => t.selector));
 }
 
 // ---------- SPA navigation detection ----------
@@ -361,7 +364,7 @@ function observeNavigation() {
       // every mutation would fight the observer's own trigger.
       applyTargets();
       // The new view may have a header we do not recognise.
-      checkTriggers();
+      checkTriggers(hookTargets().map((t) => t.selector));
     }
   });
 

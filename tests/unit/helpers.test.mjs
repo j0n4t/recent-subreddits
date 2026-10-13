@@ -18,6 +18,7 @@ import { formatTimeAgo } from '../../src/time.js';
 import { getSubredditFromUrl } from '../../src/visits.js';
 import { ICON_MAX_ATTEMPTS, ICON_RETRY_DELAYS } from '../../src/icons.js';
 import { trackVisit, removeVisit } from '../../src/visits.js';
+import { loadSettings, defaultSettings, DEFAULT_SETTINGS } from '../../src/storage.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUILT = join(HERE, '..', '..', 'recent-subreddits.user.js');
@@ -288,6 +289,66 @@ describe('visit tracking and the blacklist', () => {
     withStore(store, '/', () => removeVisit('webdev', () => {}));
     assert.deepEqual(readSettings(store).blocked, ['webdev'], 'still one entry');
   });
+});
 
+describe('the built-in trigger as a default setting', () => {
+  /** Install a GM store, run `fn`, then restore the globals. */
+  function withStore(store, fn) {
+    const prevGet = globalThis.GM_getValue;
+    const prevSet = globalThis.GM_setValue;
+    globalThis.GM_getValue = (k, d) => (k in store ? store[k] : d);
+    globalThis.GM_setValue = (k, v) => { store[k] = v; };
+    try {
+      return fn(store);
+    } finally {
+      if (prevGet === undefined) delete globalThis.GM_getValue; else globalThis.GM_getValue = prevGet;
+      if (prevSet === undefined) delete globalThis.GM_setValue; else globalThis.GM_setValue = prevSet;
+    }
+  }
 
+  test('the defaults carry the built-in hook, so a first run works', () => {
+    // The trigger used to be a hardcoded fallback in the resolver. It has to be
+    // in the defaults instead, or a fresh install would have hover disabled.
+    assert.equal(DEFAULT_SETTINGS.targets.length, 1, 'the defaults must include one target');
+    const t = DEFAULT_SETTINGS.targets[0];
+    assert.equal(t.mode, 'hook');
+    assert.equal(t.events, 'both');
+    assert.match(t.selector, /top-nav-logo/, 'the built-in selector must be there');
+    assert.match(t.selector, /navbar-menu-button/, 'including the mobile menu button');
+  });
+
+  test('the first load seeds those defaults into the store', () => {
+    const store = {};
+    const s = withStore(store, () => loadSettings());
+    assert.equal(s.targets.length, 1, 'the first load must seed a target');
+    // Persisted, not just returned: the next load must find it.
+    assert.ok(store.recentSubredditsSettings, 'the seeded settings must be written');
+    assert.equal(
+      JSON.parse(store.recentSubredditsSettings).targets.length,
+      1,
+      'and the store must hold the target'
+    );
+  });
+
+  test('a stored empty target list is respected, not re-seeded', () => {
+    // Deleting every hook is allowed, so an existing empty list must stay empty:
+    // re-seeding here would make the delete impossible to keep.
+    const store = {
+      recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], blocked: [] }),
+    };
+    const s = withStore(store, () => loadSettings());
+    assert.deepEqual(s.targets, [], 'an explicitly emptied list must not be re-seeded');
+  });
+
+  test('defaultSettings() returns a fresh copy, never the shared object', () => {
+    // The reset button writes it and the list mutates targets; sharing the
+    // module-level array would let one leak into the other.
+    const a = defaultSettings();
+    const b = defaultSettings();
+    assert.notEqual(a.targets, b.targets, 'each call must get its own array');
+    assert.notEqual(a.targets[0], b.targets[0], 'and its own target objects');
+    a.targets.push({ selector: '#x', mode: 'hook', events: 'both' });
+    assert.equal(b.targets.length, 1, 'mutating one copy must not affect another');
+    assert.equal(DEFAULT_SETTINGS.targets.length, 1, 'nor the defaults themselves');
+  });
 });

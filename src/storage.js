@@ -3,6 +3,7 @@
 // Everything here goes through the Tampermonkey store via GM_getValue/GM_setValue,
 // and every read is defensive: a hand-edited or truncated store must degrade to
 // defaults, never throw.
+import { BUILTIN_HOOK } from './defaults.js';
 
 // ---------- Visits ----------
 const STORAGE_KEY = 'recentSubreddits';
@@ -74,7 +75,27 @@ const SETTINGS_KEY = 'recentSubredditsSettings';
 // The escape hatch: a shortcut that opens the popup without depending on any
 // Reddit selector. If the header markup changes and the logo stops matching,
 // this still works, so a markup change degrades the feature instead of killing it.
-export const DEFAULT_SETTINGS = { hotkey: 'Alt+Shift+R', targets: [], blocked: [] };
+//
+// `targets` holds the built-in Reddit trigger, so the defaults ARE the working
+// configuration: a first run starts with hover working, and "reset to defaults"
+// puts that trigger back rather than leaving the user with nothing.
+export const DEFAULT_SETTINGS = {
+  hotkey: 'Alt+Shift+R',
+  targets: [BUILTIN_HOOK],
+  blocked: [],
+};
+
+/**
+ * A fresh copy of the defaults. Callers must never mutate the module-level
+ * object — its `targets` array would be shared by every reader.
+ */
+export function defaultSettings() {
+  return {
+    ...DEFAULT_SETTINGS,
+    targets: DEFAULT_SETTINGS.targets.map((t) => ({ ...t })),
+    blocked: [],
+  };
+}
 
 // Which page elements the user hooked, and how each one behaves.
 //   hook    — hovering/clicking it opens the popup
@@ -128,7 +149,14 @@ function normalizeBlocked(raw) {
 export function loadSettings() {
   try {
     const raw = GM_getValue(SETTINGS_KEY, null);
-    if (!raw) return { ...DEFAULT_SETTINGS, targets: [], blocked: [] };
+    // First run: nothing stored yet, so persist the defaults (hotkey + the
+    // built-in popup trigger). Seeding here is what makes the trigger a real,
+    // visible, removable settings entry rather than a hidden fallback.
+    if (!raw) {
+      const seeded = defaultSettings();
+      saveSettings(seeded);
+      return seeded;
+    }
     const parsed = JSON.parse(raw);
     return {
       hotkey:
@@ -139,7 +167,7 @@ export function loadSettings() {
       blocked: normalizeBlocked(parsed.blocked),
     };
   } catch {
-    return { ...DEFAULT_SETTINGS, targets: [], blocked: [] };
+    return defaultSettings();
   }
 }
 

@@ -51,6 +51,29 @@
     return parts.join("+");
   }
 
+  // src/defaults.js
+  var TRIGGER_SELECTOR = [
+    'a[href="/"]',
+    // Reddit logo link
+    "#header-logo",
+    // Old Reddit logo
+    ".header-logo",
+    // Alternative logo class
+    '[data-testid="top-nav-logo"]',
+    // New Reddit logo
+    'button[aria-label*="menu" i]',
+    // Menu button
+    "#TopNav button",
+    // Top nav button area
+    "#reddit-logo",
+    "#navbar-menu-button"
+  ].join(", ");
+  var BUILTIN_HOOK = {
+    selector: TRIGGER_SELECTOR,
+    mode: "hook",
+    events: "both"
+  };
+
   // src/storage.js
   var STORAGE_KEY = "recentSubreddits";
   var MAX_RECENT = 15;
@@ -96,7 +119,18 @@
     }
   }
   var SETTINGS_KEY = "recentSubredditsSettings";
-  var DEFAULT_SETTINGS = { hotkey: "Alt+Shift+R", targets: [], blocked: [] };
+  var DEFAULT_SETTINGS = {
+    hotkey: "Alt+Shift+R",
+    targets: [BUILTIN_HOOK],
+    blocked: []
+  };
+  function defaultSettings() {
+    return {
+      ...DEFAULT_SETTINGS,
+      targets: DEFAULT_SETTINGS.targets.map((t) => ({ ...t })),
+      blocked: []
+    };
+  }
   var TARGET_MODES = ["hook", "replace", "prepend", "append"];
   var TARGET_EVENTS = ["hover", "click", "both"];
   var hookTargetsCache = null;
@@ -131,7 +165,11 @@
   function loadSettings() {
     try {
       const raw = GM_getValue(SETTINGS_KEY, null);
-      if (!raw) return { ...DEFAULT_SETTINGS, targets: [], blocked: [] };
+      if (!raw) {
+        const seeded = defaultSettings();
+        saveSettings(seeded);
+        return seeded;
+      }
       const parsed = JSON.parse(raw);
       return {
         hotkey: typeof parsed.hotkey === "string" && parsed.hotkey.trim() ? parsed.hotkey.trim() : DEFAULT_SETTINGS.hotkey,
@@ -139,7 +177,7 @@
         blocked: normalizeBlocked(parsed.blocked)
       };
     } catch {
-      return { ...DEFAULT_SETTINGS, targets: [], blocked: [] };
+      return defaultSettings();
     }
   }
   function saveSettings(settings) {
@@ -154,40 +192,25 @@
   }
 
   // src/diagnostics.js
-  var TRIGGER_SELECTOR = [
-    'a[href="/"]',
-    // Reddit logo link
-    "#header-logo",
-    // Old Reddit logo
-    ".header-logo",
-    // Alternative logo class
-    '[data-testid="top-nav-logo"]',
-    // New Reddit logo
-    'button[aria-label*="menu" i]',
-    // Menu button
-    "#TopNav button",
-    // Top nav button area
-    "#reddit-logo",
-    "#navbar-menu-button"
-  ].join(", ");
   var warned = /* @__PURE__ */ new Set();
   function warnOnce(key, message) {
     if (warned.has(key)) return;
     warned.add(key);
     console.warn(`[recent-subreddits] ${message}`);
   }
-  function countTriggers() {
+  function countMatches(selector) {
     try {
-      return document.querySelectorAll(TRIGGER_SELECTOR).length;
+      return document.querySelectorAll(selector).length;
     } catch {
       return 0;
     }
   }
-  function checkTriggers() {
-    if (countTriggers() > 0) return;
+  function checkTriggers(hookSelectors = []) {
+    if (!hookSelectors.length) return;
+    if (hookSelectors.some((s) => countMatches(s) > 0)) return;
     warnOnce(
       "triggers",
-      `no popup trigger matched on this page (selectors: ${TRIGGER_SELECTOR}). Hovering the logo will not open the popup. Use the hotkey instead, and report this so the selectors can be updated.`
+      `none of the configured hooks matched on this page (selectors: ${hookSelectors.join(", ")}). Hovering or clicking will not open the popup. Use the hotkey instead, and check the Page targets in settings \u2014 Reddit may have changed its markup.`
     );
   }
 
@@ -353,6 +376,17 @@
     }
     .rs-status-ok { color: var(--rs-ok); }
     .rs-status-error { color: var(--rs-error); }
+    /* A standing condition rather than a transient message: e.g. no hook is
+       configured, so the popup is hotkey-only. */
+    .rs-warn {
+      margin-top: 6px;
+      padding: 6px 8px;
+      font-size: 11px;
+      line-height: 1.4;
+      color: var(--rs-text);
+      background: var(--rs-accent-soft);
+      border-radius: 4px;
+    }
 
     /* ---- Page targets ---- */
     .rs-label-row {
@@ -1100,6 +1134,7 @@
     const panel = host.querySelector(".rs-settings-panel");
     if (!panel) return;
     const settings = loadSettings();
+    const hasHook = settings.targets.some((t) => t.mode === "hook");
     const modeOptions = (selected) => [
       ["hook", "Hook (open popup)"],
       ["replace", "Replace element"],
@@ -1145,6 +1180,9 @@
       <div class="rs-hint">Pick an element on the page, then choose what it does.
         A hook opens the popup; the others render the list inline there.</div>
       <ul class="rs-targets">${targetRows}</ul>
+      ${hasHook ? "" : `<div class="rs-warn">No hook configured, so hovering or
+        clicking will not open the popup. Press <b>${escAttr(settings.hotkey)}</b>
+        to open it, or add a hook above.</div>`}
     </div>
 
     <div class="rs-field">
@@ -1233,7 +1271,11 @@
       saveSettings(s);
       ctl2.rerender(host);
       ctl2.applyTargets();
-      say("Target removed.");
+      const hooksLeft = s.targets.some((t) => t.mode === "hook");
+      say(
+        hooksLeft ? "Target removed." : `Target removed \u2014 no hook left, so use ${s.hotkey} to open the popup.`,
+        hooksLeft ? "ok" : "error"
+      );
     });
     panel.querySelector(".rs-targets").addEventListener("change", (e) => {
       const sel = e.target.closest('[data-role="mode"], [data-role="events"]');
@@ -1258,11 +1300,11 @@
     });
     panel.querySelector('[data-role="reset"]').addEventListener("click", (e) => {
       e.stopPropagation();
-      saveSettings({ ...DEFAULT_SETTINGS });
+      saveSettings(defaultSettings());
       ctl2.setActiveHotkey(parseHotkey(DEFAULT_SETTINGS.hotkey));
       ctl2.applyTargets();
       ctl2.rerender(host);
-      say(`Reset to ${DEFAULT_SETTINGS.hotkey}.`);
+      say(`Reset \u2014 ${DEFAULT_SETTINGS.hotkey}, and the built-in trigger restored.`);
     });
     panel.querySelector('[data-role="done"]').addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1462,8 +1504,6 @@
       }
       if (el) return { el, events: t.events };
     }
-    const builtin = target.closest(TRIGGER_SELECTOR);
-    if (builtin) return { el: builtin, events: "both" };
     return null;
   }
   var wantsHover = (events) => events === "hover" || events === "both";
@@ -1679,7 +1719,7 @@
         else togglePopup(true);
       }
     });
-    checkTriggers();
+    checkTriggers(hookTargets().map((t) => t.selector));
   }
   function observeNavigation() {
     let lastUrl = window.location.href;
@@ -1694,7 +1734,7 @@
         harvestIcon();
         renderContent2(loadData());
         applyTargets();
-        checkTriggers();
+        checkTriggers(hookTargets().map((t) => t.selector));
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });

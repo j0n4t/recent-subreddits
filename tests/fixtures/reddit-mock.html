@@ -83,18 +83,27 @@
       store.recentSubredditsSettings = decodeURIComponent(escape(atob(settingsParam)));
     }
 
+    // The built-in popup trigger, mirroring defaults.js. Seeded into settings so
+    // the fixture behaves like a first run, where the trigger is a real entry.
+    window.__builtinHook = {
+      selector: 'a[href=\"/\"], #header-logo, .header-logo, [data-testid=\"top-nav-logo\"], ' +
+        'button[aria-label*=\"menu\" i], #TopNav button, #reddit-logo, #navbar-menu-button',
+      mode: 'hook',
+      events: 'both',
+    };
+
     // ?blocked=a,b — the settings blacklist, so a test can start with a
     // subreddit already removed from history. Independent of ?settings=.
     const blockedParam = params.get('blocked');
     if (blockedParam) {
       const existing = store.recentSubredditsSettings
         ? JSON.parse(store.recentSubredditsSettings)
-        : { hotkey: 'Alt+Shift+R', targets: [] };
+        : { hotkey: 'Alt+Shift+R', targets: [{ ...window.__builtinHook }] };
       existing.blocked = blockedParam.split(',').map((s) => s.trim()).filter(Boolean);
       store.recentSubredditsSettings = JSON.stringify(existing);
     }
 
-    window.__store = store;
+window.__store = store;
     window.__xhrCalls = [];
     window.__xhrTimes = [];
     window.__errors = [];

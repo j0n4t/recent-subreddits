@@ -4,21 +4,6 @@
 // console without spamming it. Silent when everything matches, which is the
 // normal case.
 
-// Combined selector for every element that should trigger the popup.
-// Used with Element.closest() so listeners can live on `document` instead of
-// on the trigger nodes — the host re-renders its header on SPA navigation and
-// would otherwise swap in replacement nodes that carry no listeners.
-export const TRIGGER_SELECTOR = [
-  'a[href="/"]',                       // Reddit logo link
-  '#header-logo',                      // Old Reddit logo
-  '.header-logo',                      // Alternative logo class
-  '[data-testid="top-nav-logo"]',      // New Reddit logo
-  'button[aria-label*="menu" i]',      // Menu button
-  '#TopNav button',                    // Top nav button area
-  '#reddit-logo',
-  '#navbar-menu-button',
-].join(', ');
-
 const warned = new Set();
 
 function warnOnce(key, message) {
@@ -27,22 +12,37 @@ function warnOnce(key, message) {
   console.warn(`[recent-subreddits] ${message}`);
 }
 
-// How many elements currently match the popup triggers. 0 means the feature is
-// unreachable by hover/click — the signature of a Reddit markup change.
-function countTriggers() {
+/** How many elements a selector currently matches. 0 also covers an invalid one. */
+function countMatches(selector) {
   try {
-    return document.querySelectorAll(TRIGGER_SELECTOR).length;
+    return document.querySelectorAll(selector).length;
   } catch {
     return 0;
   }
 }
 
-export function checkTriggers() {
-  if (countTriggers() > 0) return;
+/**
+ * Warn when the configured hooks match nothing on this page — the signature of a
+ * Reddit markup change.
+ *
+ * The check is per configured hook, not against a hardcoded selector list: the
+ * built-in Reddit trigger is an ordinary settings entry now, so it may have been
+ * edited or deleted, and what matters is whether what the user actually has
+ * matches. Two cases stay silent on purpose:
+ *
+ *   * no hooks configured at all — a deliberate choice, not a broken page (the
+ *     popup is hotkey-only, and the settings panel says so);
+ *   * at least one hook matches — the feature is reachable, which is all this
+ *     diagnostic is about.
+ */
+export function checkTriggers(hookSelectors = []) {
+  if (!hookSelectors.length) return;
+  if (hookSelectors.some((s) => countMatches(s) > 0)) return;
   warnOnce(
     'triggers',
-    `no popup trigger matched on this page (selectors: ${TRIGGER_SELECTOR}). ` +
-    `Hovering the logo will not open the popup. Use the hotkey instead, ` +
-    `and report this so the selectors can be updated.`
+    `none of the configured hooks matched on this page ` +
+    `(selectors: ${hookSelectors.join(', ')}). Hovering or clicking will not ` +
+    `open the popup. Use the hotkey instead, and check the Page targets in ` +
+    `settings — Reddit may have changed its markup.`
   );
 }

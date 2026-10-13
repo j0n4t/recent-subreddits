@@ -1,10 +1,11 @@
 // Trigger resolution
 //
 // Deciding whether an event landed on something that should open the popup.
-// A user-configured hook wins over the built-in Reddit selectors, so the user's
-// own event choice applies to the element they picked.
+// Every trigger is a settings entry: the built-in Reddit logo/menu selector ships
+// as a default entry (see defaults.js) rather than as a hardcoded fallback, so it
+// can be inspected, edited, and deleted like anything else. With no hook
+// configured there is nothing here to match, and the popup opens by hotkey only.
 import { hookTargets } from './storage.js';
-import { TRIGGER_SELECTOR } from './diagnostics.js';
 
 /**
  * Resolve an event target to `{el, events}` if it is a popup trigger, else null.
@@ -23,10 +24,6 @@ export function resolveTrigger(target) {
     }
     if (el) return { el, events: t.events };
   }
-
-  const builtin = target.closest(TRIGGER_SELECTOR);
-  // The stock logo triggers keep the original behaviour: hover and click.
-  if (builtin) return { el: builtin, events: 'both' };
 
   return null;
 }

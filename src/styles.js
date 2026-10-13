@@ -164,6 +164,17 @@ export function injectStyles() {
     }
     .rs-status-ok { color: var(--rs-ok); }
     .rs-status-error { color: var(--rs-error); }
+    /* A standing condition rather than a transient message: e.g. no hook is
+       configured, so the popup is hotkey-only. */
+    .rs-warn {
+      margin-top: 6px;
+      padding: 6px 8px;
+      font-size: 11px;
+      line-height: 1.4;
+      color: var(--rs-text);
+      background: var(--rs-accent-soft);
+      border-radius: 4px;
+    }
 
     /* ---- Page targets ---- */
     .rs-label-row {
