@@ -72,6 +72,9 @@ function removeVisit(name) {
 /** Repaint the list in every mounted instance. */
 function refreshList() {
   refreshAll(loadData());
+  // The list's height changes with its contents (a removal shortens it, a pin
+  // adds a section), and the popup's placement is derived from that height.
+  repositionPopup();
 }
 
 /**
@@ -169,6 +172,9 @@ function setSettingsOpen(open, instance) {
   const title = host.querySelector('.rs-header');
   if (title) title.textContent = open ? HEADER_TITLE.settings : HEADER_TITLE.main;
   if (open) renderSettings(host);
+  // The panel is a very different height from the list, so the popup has to be
+  // placed again or it keeps the position chosen for the other view.
+  if (host === popupEl) repositionPopup();
 }
 
 // Kept in a module-level variable so the hotkey can change without rebinding.
@@ -200,6 +206,25 @@ function togglePopup(show, trigger) {
 
 function isPopupVisible() {
   return !!popupEl && popupEl.classList.contains('visible');
+}
+
+/**
+ * Re-place the popup at its current anchor.
+ *
+ * The height the placement math reads is the height the popup has RIGHT NOW, so
+ * anything that changes its content has to place it again — otherwise the popup
+ * keeps the position chosen for its old size. Opening the settings panel is the
+ * case that bit: it grows the popup from the list's height to roughly 500px, and
+ * a popup that was placed to fit as a short list then ran off the bottom of the
+ * viewport with its Done button unreachable.
+ *
+ * No-op while hidden: positionPopup() reads offsetHeight, which is 0 for a
+ * display:none element, so placing it now would store a nonsense position.
+ */
+function repositionPopup() {
+  if (!isPopupVisible()) return;
+  if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(popupEl, lastTrigger);
+  else positionPopupCentered(popupEl);
 }
 
 // ---------- Keep our own nodes alive ----------

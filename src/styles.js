@@ -23,7 +23,13 @@ export function injectStyles() {
       display: none;
       position: fixed;
       width: 280px;
-      max-height: 70vh;
+      /* Total width, so it matches POPUP_WIDTH in position.js — the clamp on the
+         right edge is computed from that constant. */
+      box-sizing: border-box;
+      /* NO max-height here: position.js sets it per placement, from the room
+         below or above the trigger. A fixed 70vh knew nothing about where the
+         popup started, so a trigger low on the page produced a popup running
+         off the bottom of the viewport. */
       overflow-y: auto;
       background: var(--rs-bg);
       border: 1px solid var(--rs-border);
@@ -269,6 +275,15 @@ export function injectStyles() {
       display: flex;
       justify-content: space-between;
       gap: 8px;
+      /* Pinned to the bottom of the popup's scrollport. The panel is ~590px of
+         content, so on a short viewport it scrolls — and Done is the way out of
+         the panel, so it must not be the thing that scrolls out of reach. The
+         background is required: without it the fields scroll visibly behind. */
+      position: sticky;
+      bottom: 0;
+      background: var(--rs-bg);
+      padding-top: 8px;
+      margin-top: 4px;
     }
     .rs-btn {
       display: flex;

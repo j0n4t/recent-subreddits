@@ -41,6 +41,15 @@ anchored to Reddit's logo, with the ability to pin favorites for quick access.
 - **Hotkey**: press `Alt+Shift+R` (or your configured combination) to open the
   popup from anywhere. It does not depend on any Reddit markup, so it still works
   when the hover trigger does not.
+- **Hide row controls until hover**: a settings option that keeps each row's 📌 and
+  🗑, and the header's ✕, invisible until you hover the row they belong to. Off by
+  default.
+
+The popup is sized to the space it has: it is capped to the room below (or above)
+its trigger and scrolls internally when its content is taller, so it never runs off
+the viewport. Opening Settings re-places it, since the panel is much taller than the
+list, and the panel's Reset/Done row stays pinned to the bottom so the way out is
+always reachable.
 
 ### When it breaks
 

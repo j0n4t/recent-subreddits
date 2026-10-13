@@ -735,6 +735,166 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.deepEqual(second, { prevented: false, open: false }, 'closing click must not preventDefault');
   });
 
+  // ---- Viewport fitting: the popup must never be cut off ----
+
+  /** Park the logo at a fixed spot, like a real page header would sit. */
+  const parkLogo = (top, left = 300) => run((a) => {
+    const [t, l] = a;
+    const logo = document.querySelector('#logo');
+    logo.style.cssText = `position:fixed;top:${t}px;left:${l}px;display:block;width:40px;height:40px;`;
+    return true;
+  }, [top, left]);
+
+  /** Force a viewport size, so the fit can be asserted at more than one height. */
+  async function viewport(width, height) {
+    await b.session('Emulation.setDeviceMetricsOverride', {
+      width, height, deviceScaleFactor: 1, mobile: false,
+    });
+  }
+
+  /** Where the popup renders, and whether anything of it is off-screen. */
+  const FIT = run((popupSel) => {
+    const p = document.querySelector(popupSel);
+    const r = p.getBoundingClientRect();
+    const done = p.querySelector('[data-role="done"]');
+    const hit = done ? document.elementFromPoint(
+      Math.round(done.getBoundingClientRect().left + done.getBoundingClientRect().width / 2),
+      Math.round(done.getBoundingClientRect().top + done.getBoundingClientRect().height / 2)
+    ) : null;
+    return {
+      top: Math.round(r.top),
+      bottom: Math.round(r.bottom),
+      height: Math.round(r.height),
+      winH: window.innerHeight,
+      overflowsBottom: Math.round(r.bottom - window.innerHeight),
+      overflowsTop: Math.round(-r.top),
+      // Rendered total width, to pin box-sizing against POPUP_WIDTH.
+      width: Math.round(r.width),
+      // Is the panel's exit reachable without scrolling to it?
+      doneOnScreen: done ? (() => {
+        const d = done.getBoundingClientRect();
+        return d.bottom <= window.innerHeight && d.top >= 0;
+      })() : null,
+      // ...and is it actually what is painted there (not covered by the fields
+      // scrolling behind it)?
+      doneHit: hit ? (hit === done || done.contains(hit) ? 'done' : hit.tagName.toLowerCase()) : null,
+    };
+  }, POPUP);
+
+  test('FIT: opening settings re-places the popup, so it is not cut off at the bottom', async () => {
+    // The bug: the popup was placed once, from the list's height. Opening
+    // settings grew it from ~116px to ~530px while it kept the old position, so
+    // it ran off the bottom of the viewport. Measured before the fix: at
+    // 1280x600 with a short list and the trigger parked low, the popup ended
+    // 92px past the viewport bottom and Done sat at bottom 800 — unreachable.
+    await viewport(1280, 600);
+    await b.goto(`${fixtureUrl({ recent: [{ name: 'a', visitedAt: Date.now() }], pinned: [] })}&iconDelay=999999`);
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    // Park the trigger low, which is what makes the list-height placement wrong.
+    await b.evaluate(parkLogo(540));
+    await openPopup('popup open with the trigger low');
+
+    const list = await b.evaluate(FIT);
+    assert.ok(list.overflowsBottom <= 0, `the list must fit, got ${JSON.stringify(list)}`);
+
+    await openPanel('settings panel open');
+
+    const settings = await b.evaluate(FIT);
+    assert.ok(
+      settings.overflowsBottom <= 0,
+      `opening settings must not push the popup off the bottom, got ${JSON.stringify(settings)}`
+    );
+    assert.ok(settings.overflowsTop <= 0, `nor off the top, got ${JSON.stringify(settings)}`);
+    assert.ok(
+      settings.height > list.height,
+      `the panel is taller than the list, so this must be the grown case: ${JSON.stringify({ list, settings })}`
+    );
+  });
+
+  test('FIT: the popup never overflows the viewport, at any trigger position or height', async () => {
+    // Sweep the combinations that broke it: trigger high / low / at the right
+    // edge, and a viewport too short to hold the panel.
+    const seed = { recent: [{ name: 'a', visitedAt: Date.now() }], pinned: [] };
+    const cases = [
+      { w: 1280, h: 800, top: 8, left: 300, label: 'tall viewport, trigger high' },
+      { w: 1280, h: 600, top: 8, left: 300, label: 'trigger high' },
+      { w: 1280, h: 600, top: 540, left: 300, label: 'trigger low' },
+      { w: 1280, h: 500, top: 8, left: 300, label: 'short viewport' },
+      { w: 1280, h: 600, top: 8, left: 1250, label: 'trigger at the right edge' },
+      { w: 1280, h: 600, top: 540, left: 1250, label: 'trigger low and right' },
+    ];
+
+    for (const c of cases) {
+      await viewport(c.w, c.h);
+      await b.goto(`${fixtureUrl(seed)}&iconDelay=999999`);
+      await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+      await b.evaluate(parkLogo(c.top, c.left));
+      await openPopup(`popup open (${c.label})`);
+
+      for (const [view, step] of [['list', null], ['settings', 'openPanel']]) {
+        if (step === 'openPanel') await openPanel(`settings open (${c.label})`);
+        const m = await b.evaluate(FIT);
+        assert.ok(
+          m.overflowsBottom <= 0,
+          `${c.label} / ${view}: popup runs ${m.overflowsBottom}px past the bottom, got ${JSON.stringify(m)}`
+        );
+        assert.ok(
+          m.overflowsTop <= 0,
+          `${c.label} / ${view}: popup runs ${m.overflowsTop}px past the top, got ${JSON.stringify(m)}`
+        );
+        // The width clamp uses POPUP_WIDTH, so the rendered box has to match it.
+        assert.ok(
+          m.width <= 280,
+          `${c.label} / ${view}: rendered ${m.width}px wide, wider than the 280px the clamp assumes`
+        );
+      }
+
+      // Close between cases so the next open is a fresh placement.
+      await b.evaluate(CLICK_BODY);
+      await b.waitUntil(run((popupSel) => !document.querySelector(popupSel).classList.contains('visible'), POPUP), 'popup closed');
+    }
+  });
+
+  test('FIT: the settings panel is scrollable and its Done button stays reachable', async () => {
+    // A viewport too short for the ~590px panel: the popup caps and scrolls, and
+    // Done is the way OUT of the panel, so it must not be the thing that scrolls
+    // out of reach. It is sticky for that reason.
+    await viewport(1280, 500);
+    await b.goto(`${fixtureUrl({ recent: [{ name: 'a', visitedAt: Date.now() }], pinned: [] })}&iconDelay=999999`);
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+    await openPanel('settings panel open');
+
+    const scrollable = await b.evaluate(run((popupSel) => {
+      const p = document.querySelector(popupSel);
+      return { canScroll: p.scrollHeight > p.clientHeight, clientH: p.clientHeight, scrollH: p.scrollHeight };
+    }, POPUP));
+    assert.equal(
+      scrollable.canScroll,
+      true,
+      `the panel must scroll rather than overflow, got ${JSON.stringify(scrollable)}`
+    );
+
+    // Reachable AND topmost — a sticky bar with no background would let the
+    // fields show through it, which reads as a cut-off button.
+    const before = await b.evaluate(FIT);
+    assert.equal(before.doneOnScreen, true, `Done must be on screen, got ${JSON.stringify(before)}`);
+    assert.equal(before.doneHit, 'done', `Done must be what is painted there, got ${JSON.stringify(before)}`);
+
+    // Still reachable after scrolling to the end of the panel.
+    await b.evaluate(run((popupSel) => { document.querySelector(popupSel).scrollTop = 99999; return true; }, POPUP));
+    const after = await b.evaluate(FIT);
+    assert.equal(after.doneOnScreen, true, `Done must stay on screen after scrolling, got ${JSON.stringify(after)}`);
+    assert.equal(after.doneHit, 'done', `and stay clickable, got ${JSON.stringify(after)}`);
+
+    // And it really does exit the panel.
+    await b.evaluate(run(() => document.querySelector('[data-role="done"]').click()));
+    await b.waitUntil(
+      run((popupSel) => !document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
+      'Done to close the settings panel'
+    );
+  });
+
   test('flips above the trigger when there is no room below', async () => {
     await open();
 

@@ -241,7 +241,13 @@
       display: none;
       position: fixed;
       width: 280px;
-      max-height: 70vh;
+      /* Total width, so it matches POPUP_WIDTH in position.js \u2014 the clamp on the
+         right edge is computed from that constant. */
+      box-sizing: border-box;
+      /* NO max-height here: position.js sets it per placement, from the room
+         below or above the trigger. A fixed 70vh knew nothing about where the
+         popup started, so a trigger low on the page produced a popup running
+         off the bottom of the viewport. */
       overflow-y: auto;
       background: var(--rs-bg);
       border: 1px solid var(--rs-border);
@@ -487,6 +493,15 @@
       display: flex;
       justify-content: space-between;
       gap: 8px;
+      /* Pinned to the bottom of the popup's scrollport. The panel is ~590px of
+         content, so on a short viewport it scrolls \u2014 and Done is the way out of
+         the panel, so it must not be the thing that scrolls out of reach. The
+         background is required: without it the fields scroll visibly behind. */
+      position: sticky;
+      bottom: 0;
+      background: var(--rs-bg);
+      padding-top: 8px;
+      margin-top: 4px;
     }
     .rs-btn {
       display: flex;
@@ -924,28 +939,42 @@
   var POPUP_WIDTH = 280;
   var GAP = 8;
   var MARGIN = 16;
+  var MIN_HEIGHT = 120;
+  function viewportRoom() {
+    return window.innerHeight - MARGIN * 2;
+  }
+  function roomAround(rect) {
+    return {
+      below: window.innerHeight - MARGIN - (rect.bottom + GAP),
+      above: rect.top - GAP - MARGIN
+    };
+  }
+  function capAndMeasure(popup, maxHeight) {
+    popup.style.maxHeight = Math.max(MIN_HEIGHT, Math.round(maxHeight)) + "px";
+    return popup.offsetHeight;
+  }
   function positionPopup(popup, trigger) {
     const rect = trigger.getBoundingClientRect();
-    const popupHeight = popup.offsetHeight || 300;
+    const room = roomAround(rect);
+    const natural = capAndMeasure(popup, viewportRoom());
+    let below;
+    if (room.below >= natural) below = true;
+    else if (room.above >= natural) below = false;
+    else below = room.below >= room.above;
+    const side = below ? room.below : room.above;
+    const height = capAndMeasure(popup, Math.min(side, viewportRoom()));
+    let top = below ? rect.bottom + GAP : rect.top - GAP - height;
+    top = Math.max(MARGIN, Math.min(top, window.innerHeight - height - MARGIN));
     let left = rect.left;
     if (left + POPUP_WIDTH > window.innerWidth - MARGIN) {
       left = window.innerWidth - POPUP_WIDTH - MARGIN;
     }
     if (left < MARGIN) left = MARGIN;
-    let top = rect.bottom + GAP;
-    if (top + popupHeight > window.innerHeight - MARGIN) {
-      const aboveTop = rect.top - popupHeight - GAP;
-      if (aboveTop >= MARGIN) {
-        top = aboveTop;
-      } else {
-        top = Math.max(MARGIN, Math.min(top, window.innerHeight - popupHeight - MARGIN));
-      }
-    }
-    popup.style.left = left + "px";
-    popup.style.top = top + "px";
+    popup.style.left = Math.round(left) + "px";
+    popup.style.top = Math.round(top) + "px";
   }
   function positionPopupCentered(popup) {
-    const height = popup.offsetHeight || 300;
+    const height = capAndMeasure(popup, viewportRoom());
     const left = Math.max(MARGIN, Math.round((window.innerWidth - POPUP_WIDTH) / 2));
     const top = Math.max(MARGIN, Math.round((window.innerHeight - height) / 2));
     popup.style.left = left + "px";
@@ -1611,6 +1640,7 @@
   }
   function refreshList() {
     refreshAll(loadData());
+    repositionPopup();
   }
   function applyControlVisibility() {
     const hide = loadSettings().hideRowControls;
@@ -1666,6 +1696,7 @@
     const title = host.querySelector(".rs-header");
     if (title) title.textContent = open ? HEADER_TITLE.settings : HEADER_TITLE.main;
     if (open) renderSettings(host);
+    if (host === popupEl) repositionPopup();
   }
   var activeHotkey = null;
   var lastTrigger = null;
@@ -1684,6 +1715,11 @@
   }
   function isPopupVisible() {
     return !!popupEl && popupEl.classList.contains("visible");
+  }
+  function repositionPopup() {
+    if (!isPopupVisible()) return;
+    if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(popupEl, lastTrigger);
+    else positionPopupCentered(popupEl);
   }
   function ensureMounted() {
     if (!sidebarEl) return;
