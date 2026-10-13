@@ -23,6 +23,31 @@ import { loadSettings, defaultSettings, DEFAULT_SETTINGS } from '../../src/stora
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUILT = join(HERE, '..', '..', 'recent-subreddits.user.js');
 
+/**
+ * Install a GM store, run `fn`, then restore the globals.
+ *
+ * Only the GM store is stubbed: the visit-tracking functions under test take the
+ * subreddit name as an argument and never read `window.location`. The one helper
+ * that does — getSubredditFromUrl() — is driven by withPath() below, which
+ * installs its own location stub.
+ */
+function withStore(store, fn) {
+  const prev = {
+    GM_getValue: globalThis.GM_getValue,
+    GM_setValue: globalThis.GM_setValue,
+  };
+  globalThis.GM_getValue = (k, d) => (k in store ? store[k] : d);
+  globalThis.GM_setValue = (k, v) => { store[k] = v; };
+  try {
+    return fn(store);
+  } finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete globalThis[k];
+      else globalThis[k] = v;
+    }
+  }
+}
+
 describe('metadata block', () => {
   // Read the BUILT file, not src/userscript.meta.js: the grants that matter are
   // the ones Tampermonkey actually sees, and the banner is only prepended at
@@ -212,32 +237,12 @@ describe('visit tracking and the blacklist', () => {
   // cannot cover this: its fixture is a file:// page, so there is no subreddit
   // URL for the tracker to read, and trackVisit() never runs there.
 
-  /** Install a GM store + location, run `fn`, then restore the globals. */
-  function withStore(store, pathname, fn) {
-    const prev = {
-      GM_getValue: globalThis.GM_getValue,
-      GM_setValue: globalThis.GM_setValue,
-      window: globalThis.window,
-    };
-    globalThis.GM_getValue = (k, d) => (k in store ? store[k] : d);
-    globalThis.GM_setValue = (k, v) => { store[k] = v; };
-    globalThis.window = { location: { pathname } };
-    try {
-      return fn(store);
-    } finally {
-      for (const [k, v] of Object.entries(prev)) {
-        if (v === undefined) delete globalThis[k];
-        else globalThis[k] = v;
-      }
-    }
-  }
-
   const readData = (store) => JSON.parse(store.recentSubreddits || '{"recent":[],"pinned":[]}');
   const readSettings = (store) => JSON.parse(store.recentSubredditsSettings || '{"blocked":[]}');
 
   test('a visit is recorded', () => {
     const store = {};
-    withStore(store, '/r/webdev/', () => trackVisit('webdev'));
+    withStore(store, () => trackVisit('webdev'));
     assert.deepEqual(readData(store).recent.map((r) => r.name), ['webdev']);
   });
 
@@ -247,7 +252,7 @@ describe('visit tracking and the blacklist', () => {
     const store = {
       recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], blocked: ['webdev'] }),
     };
-    withStore(store, '/r/webdev/', () => trackVisit('webdev'));
+    withStore(store, () => trackVisit('webdev'));
     assert.deepEqual(
       readData(store).recent,
       [],
@@ -263,7 +268,7 @@ describe('visit tracking and the blacklist', () => {
       recentSubreddits: JSON.stringify({ recent: [{ name: 'webdev', visitedAt: 1 }], pinned: [] }),
       recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], blocked: ['webdev'] }),
     };
-    withStore(store, '/r/webdev/', () => trackVisit('webdev'));
+    withStore(store, () => trackVisit('webdev'));
     assert.deepEqual(readData(store).recent.map((r) => r.name), ['webdev'], 'unchanged');
   });
 
@@ -275,7 +280,7 @@ describe('visit tracking and the blacklist', () => {
       }),
       recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [] }),
     };
-    withStore(store, '/', () => removeVisit('webdev', () => {}));
+    withStore(store, () => removeVisit('webdev', () => {}));
 
     assert.deepEqual(readData(store).recent.map((r) => r.name), ['linux'], 'row dropped');
     assert.deepEqual(readSettings(store).blocked, ['webdev'], 'and blacklisted');
@@ -286,26 +291,12 @@ describe('visit tracking and the blacklist', () => {
       recentSubreddits: JSON.stringify({ recent: [{ name: 'webdev', visitedAt: 1 }], pinned: [] }),
       recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], blocked: ['webdev'] }),
     };
-    withStore(store, '/', () => removeVisit('webdev', () => {}));
+    withStore(store, () => removeVisit('webdev', () => {}));
     assert.deepEqual(readSettings(store).blocked, ['webdev'], 'still one entry');
   });
 });
 
 describe('the built-in trigger as a default setting', () => {
-  /** Install a GM store, run `fn`, then restore the globals. */
-  function withStore(store, fn) {
-    const prevGet = globalThis.GM_getValue;
-    const prevSet = globalThis.GM_setValue;
-    globalThis.GM_getValue = (k, d) => (k in store ? store[k] : d);
-    globalThis.GM_setValue = (k, v) => { store[k] = v; };
-    try {
-      return fn(store);
-    } finally {
-      if (prevGet === undefined) delete globalThis.GM_getValue; else globalThis.GM_getValue = prevGet;
-      if (prevSet === undefined) delete globalThis.GM_setValue; else globalThis.GM_setValue = prevSet;
-    }
-  }
-
   test('the defaults carry the built-in hook, so a first run works', () => {
     // The trigger used to be a hardcoded fallback in the resolver. It has to be
     // in the defaults instead, or a fresh install would have hover disabled.
