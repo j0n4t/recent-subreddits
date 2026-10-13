@@ -13,23 +13,7 @@ is fixed.
 
 ---
 
-## 1. Line endings are not pinned (`.gitattributes`)
-
-**Why it matters.** The working copy is CRLF while the source is written LF, so
-git rewrites line endings on every commit (`LF will be replaced by CRLF` on every
-build and commit) and tooling that matches text anchors — targeted edits, patches
-— fails on multi-line matches for no visible reason. This has cost real time
-repeatedly, and it will keep doing so.
-
-**Fix.** Add `.gitattributes` with `* text=auto eol=lf`. An `.editorconfig`
-saying the same thing belongs in the same commit.
-
-**Done when.** `git status` after a build is clean and no CRLF warnings appear on
-commit.
-
----
-
-## 2. A stale committed artifact is not caught
+## 1. A stale committed artifact is not caught
 
 **Why it matters.** `recent-subreddits.user.js` is a build output that is
 committed, because it is the file users paste into Tampermonkey. It was touched
@@ -49,7 +33,7 @@ produces no diff), so a local script covers it with no CI needed:
 
 ---
 
-## 3. Tests embed JavaScript as strings, so nothing can check them
+## 2. Tests embed JavaScript as strings, so nothing can check them
 
 **Why it matters.** There are 237 `b.evaluate(\`...\`)` calls. The test logic
 lives inside template literals, which means:
@@ -80,7 +64,7 @@ test logic rather than skipping over it.
 
 ---
 
-## 4. Repeated preambles in the e2e suite
+## 3. Repeated preambles in the e2e suite
 
 **Why it matters.** Measured: 34 occurrences of the "hover the logo, wait for the
 popup" preamble and 29 of the "open settings, wait for `settings-open`" dance,
@@ -100,7 +84,7 @@ async function openByHotkey(b)   // for tests that seed their own targets
 
 ---
 
-## 5. Two `withStore` helpers in the unit suite
+## 4. Two `withStore` helpers in the unit suite
 
 **Why it matters.** `tests/unit/helpers.test.mjs` defines `withStore` at line 216
 (takes a pathname) and again at line 296 (does not). The second was added rather
@@ -113,7 +97,7 @@ drift.
 
 ---
 
-## 6. Index-based assertions in the tests
+## 5. Index-based assertions in the tests
 
 **Why it matters.** `targets[1].mode` and `.at(-1)` assume a row order. That is
 exactly what broke when the seeded built-in hook started appearing first: the
@@ -127,7 +111,7 @@ test picked — rather than by position.
 
 ---
 
-## 7. The built-in selector is duplicated across four files
+## 6. The built-in selector is duplicated across four files
 
 **Why it matters.** `TRIGGER_SELECTOR` is hand-copied into
 `tests/e2e/sidebar.test.mjs`, `tests/fixtures/reddit-mock.html` and
@@ -143,7 +127,7 @@ deliberate fixture copy, with a test tying them together.
 
 ---
 
-## 8. The measurements this design rests on are not preserved
+## 7. The measurements this design rests on are not preserved
 
 **Why it matters.** Several decisions depend on facts measured against the live
 site, and those facts are not written down anywhere durable:
@@ -167,7 +151,7 @@ claims cannot be re-verified without rewriting them.
 
 ---
 
-## 9. README has drifted from the code
+## 8. README has drifted from the code
 
 **Why it matters.** Two concrete regressions:
 
@@ -183,7 +167,7 @@ appears in `src/`.
 
 ---
 
-## 10. The e2e fixture is a `file://` page, so URL-dependent code is untestable
+## 9. The e2e fixture is a `file://` page, so URL-dependent code is untestable
 
 **Why it matters.** Because the fixture has no `/r/<name>/` path, `trackVisit()`
 never runs in e2e — the "a blacklisted subreddit is never tracked again" test had
@@ -199,7 +183,7 @@ in e2e.
 
 ---
 
-## 11. A harvest failure is silent
+## 10. A harvest failure is silent
 
 **Why it matters.** `checkTriggers()` warns when configured hooks match nothing,
 which makes a Reddit markup change visible. The harvest has the same failure
@@ -213,7 +197,7 @@ the exact bug this repo already fixed once — with nothing in the console.
 
 ---
 
-## 12. `escAttr` lives in `icons.js`
+## 11. `escAttr` lives in `icons.js`
 
 **Why it matters.** It is a generic HTML-escaping helper defined in the icon
 module and imported by `content.js` and `settings-panel.js` for unrelated
@@ -226,7 +210,7 @@ false, and a reader editing icon logic meets an HTML helper they did not expect.
 
 ---
 
-## 13. The injected stylesheet is never validated
+## 12. The injected stylesheet is never validated
 
 **Why it matters.** `injectStyles()` builds one large CSS string. A typo — a
 missing brace, a misspelled property — fails silently at runtime, and nothing
@@ -240,7 +224,7 @@ after injection. Cheap and it closes a whole failure class.
 
 ---
 
-## 14. Keyboard navigation in the popup
+## 13. Keyboard navigation in the popup
 
 **Why it matters.** The hotkey exists so the popup works regardless of Reddit's
 markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
@@ -251,7 +235,7 @@ existing trash/blocklist logic.
 
 ---
 
-## 15. Import / export settings
+## 14. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey
@@ -262,7 +246,7 @@ configuration is meaningful.
 
 ---
 
-## 16. Relative timestamps freeze while the popup is open
+## 15. Relative timestamps freeze while the popup is open
 
 **Why it matters.** `formatTimeAgo` runs at render only, so an open popup keeps
 showing "just now" indefinitely.
@@ -271,7 +255,7 @@ showing "just now" indefinitely.
 
 ---
 
-## 17. An inline target that matches nothing is silent
+## 16. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming
@@ -291,7 +275,7 @@ roughly in this order.
   browser present, and the harness documents the Playwright cache location, so
   e2e can run in CI rather than being skipped.
 - **The artifact-freshness gate in CI too**, so a pull request cannot merge a
-  stale build. Item 2 covers the local script; CI makes it enforceable.
+  stale build. Item 1 covers the local script; CI makes it enforceable.
 - **`.gitattributes` matters more** once anyone else clones — the CRLF churn
   becomes their problem too.
 - **Check a `LICENSE` file exists.** The README says MIT; confirm the file is
@@ -312,9 +296,9 @@ roughly in this order.
   indirection for no gain.
 - **Splitting the e2e test file.** It is 1977 lines, but a flat list of 61 tests
   that greps cleanly. Splitting it would scatter the shared fixture and helpers
-  for no gain — item 4 is the fix that actually reduces the weight.
+  for no gain — item 3 is the fix that actually reduces the weight.
 - **Typechecking `tests/`.** `tsconfig.json` covers `src` only. Extending it
-  would not help much while test logic lives in strings; item 3 is the fix that
+  would not help much while test logic lives in strings; item 2 is the fix that
   makes typechecking tests meaningful.
 - **Multiple settings profiles.** The target model would support it, but nothing
   suggests the complexity is wanted.
