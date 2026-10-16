@@ -19,10 +19,11 @@ const browserPath = findBrowser();
 const skip = browserPath ? false : 'no Chromium found (set E2E_BROWSER to override)';
 
 /** Build the fixture URL with a seeded GM store. */
-function fixtureUrl(seed, iconDelay = 5, iconFail = null) {
+function fixtureUrl(seed, iconDelay = 5, iconFail = null, settings = null) {
   const b64 = Buffer.from(JSON.stringify(seed), 'utf8').toString('base64');
   const fail = iconFail ? `&iconFail=${encodeURIComponent(iconFail)}` : '';
-  return `${FIXTURE}?seed=${encodeURIComponent(b64)}&iconDelay=${iconDelay}${fail}`;
+  const settingsQuery = settings ? `&settings=${settingsParam(settings)}` : '';
+  return `${FIXTURE}?seed=${encodeURIComponent(b64)}&iconDelay=${iconDelay}${fail}${settingsQuery}`;
 }
 
 /**
@@ -519,6 +520,97 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // The change must be persisted, not just rendered.
     const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubreddits)));
     assert.deepEqual(stored.pinned, ['javascript'], 'pin state must be written to GM storage');
+  });
+
+  test('reorder: up/down buttons change the pinned order', async () => {
+    // Seed with three pinned subreddits so both directions are testable.
+    const seed = { recent: [], pinned: ['alpha', 'beta', 'gamma'] };
+    await b.goto(fixtureUrl(seed));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+
+    // Move alpha down: alpha beta gamma -> beta alpha gamma
+    await b.evaluate(run(() => document.querySelector('.rs-reorder-down[data-name="alpha"]').click()));
+    await b.waitUntil(
+      run(() => {
+        const names = Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent);
+        return names.join(',') === 'r/beta,r/alpha,r/gamma';
+      }),
+      'alpha to move down'
+    );
+    assert.deepEqual(
+      await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent))),
+      ['r/beta', 'r/alpha', 'r/gamma']
+    );
+
+    // Move gamma up: beta alpha gamma -> beta gamma alpha
+    await b.evaluate(run(() => document.querySelector('.rs-reorder-up[data-name="gamma"]').click()));
+    await b.waitUntil(
+      run(() => {
+        const names = Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent);
+        return names.join(',') === 'r/beta,r/gamma,r/alpha';
+      }),
+      'gamma to move up'
+    );
+
+    // Persisted, not just rendered.
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubreddits)));
+    assert.deepEqual(stored.pinned, ['beta', 'gamma', 'alpha'], 'reorder must be written to GM storage');
+  });
+
+  test('reorder: first item has up disabled, last item has down disabled', async () => {
+    const seed = { recent: [], pinned: ['alpha', 'beta', 'gamma'] };
+    await b.goto(fixtureUrl(seed));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+
+    const disabled = await b.evaluate(run(() => ({
+      firstUp: document.querySelector('.rs-reorder-up[data-name="alpha"]').disabled,
+      lastDown: document.querySelector('.rs-reorder-down[data-name="gamma"]').disabled,
+      middleUp: document.querySelector('.rs-reorder-up[data-name="beta"]').disabled,
+      middleDown: document.querySelector('.rs-reorder-down[data-name="beta"]').disabled,
+    })));
+    assert.equal(disabled.firstUp, true, 'first item must have up disabled');
+    assert.equal(disabled.lastDown, true, 'last item must have down disabled');
+    assert.equal(disabled.middleUp, false, 'middle item must have up enabled');
+    assert.equal(disabled.middleDown, false, 'middle item must have down enabled');
+  });
+
+  test('reorder: clicking a disabled button does not change the order', async () => {
+    const seed = { recent: [], pinned: ['alpha', 'beta'] };
+    await b.goto(fixtureUrl(seed));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+
+    // Click the disabled up on the first item — should be a no-op.
+    await b.evaluate(run(() => document.querySelector('.rs-reorder-up[data-name="alpha"]').click()));
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(
+      await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent))),
+      ['r/alpha', 'r/beta'],
+      'order must not change when clicking a disabled button'
+    );
+  });
+
+  test('reorder: works from an inline block too', async () => {
+    const settings = {
+      hotkey: 'Alt+Shift+R',
+      targets: [{ selector: '#pick-target', mode: 'replace', events: 'both' }],
+      blocked: [],
+    };
+    const seed = { recent: [], pinned: ['alpha', 'beta', 'gamma'] };
+    await b.goto(fixtureUrl(seed, 5, null, settings));
+    await b.waitUntil(run(() => !!document.querySelector('.rs-inline .rs-pinned')), 'inline block to mount');
+
+    // Move alpha down in the inline block.
+    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-reorder-down[data-name="alpha"]').click()));
+    await b.waitUntil(
+      run(() => {
+        const names = Array.from(document.querySelectorAll('.rs-inline .rs-pinned .rs-link')).map(a => a.textContent);
+        return names.join(',') === 'r/beta,r/alpha,r/gamma';
+      }),
+      'alpha to move down in inline block'
+    );
   });
 
   test('fetches a subreddit icon and patches the src in place', async () => {

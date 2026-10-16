@@ -602,6 +602,22 @@
       transition: opacity 0.15s;
     }
     .rs-pin-btn:hover, .rs-unpin-btn:hover { opacity: 1; }
+    .rs-reorder-up, .rs-reorder-down {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px;
+      font-size: 10px;
+      line-height: 1;
+      color: var(--rs-text-muted);
+      opacity: 0.5;
+      transition: opacity 0.15s;
+    }
+    .rs-reorder-up:hover, .rs-reorder-down:hover { opacity: 1; }
+    .rs-reorder-up:disabled, .rs-reorder-down:disabled {
+      opacity: 0.15;
+      cursor: default;
+    }
     /* The trash sits next to the pin and matches it, so a row's controls read as
        one group. Recent rows only \u2014 the Pinned section uses the \u2715 above. */
     .rs-remove-btn {
@@ -631,15 +647,21 @@
        controls themselves, so the default look is untouched. */
     .rs-hide-controls .rs-pin-btn,
     .rs-hide-controls .rs-unpin-btn,
-    .rs-hide-controls .rs-remove-btn {
+    .rs-hide-controls .rs-remove-btn,
+    .rs-hide-controls .rs-reorder-up,
+    .rs-hide-controls .rs-reorder-down {
       opacity: 0;
     }
     .rs-hide-controls .rs-item:hover .rs-pin-btn,
     .rs-hide-controls .rs-item:hover .rs-unpin-btn,
     .rs-hide-controls .rs-item:hover .rs-remove-btn,
+    .rs-hide-controls .rs-item:hover .rs-reorder-up,
+    .rs-hide-controls .rs-item:hover .rs-reorder-down,
     .rs-hide-controls .rs-pin-btn:focus-visible,
     .rs-hide-controls .rs-unpin-btn:focus-visible,
-    .rs-hide-controls .rs-remove-btn:focus-visible {
+    .rs-hide-controls .rs-remove-btn:focus-visible,
+    .rs-hide-controls .rs-reorder-up:focus-visible,
+    .rs-hide-controls .rs-reorder-down:focus-visible {
       opacity: 1;
     }
     /* The main close button follows the same rule, revealed by hovering the
@@ -806,6 +828,16 @@
     } else {
       data.pinned.unshift(name);
     }
+    saveData(data);
+    refresh(data);
+  }
+  function movePinned(name, direction, refresh) {
+    const data = loadData();
+    const idx = data.pinned.indexOf(name);
+    if (idx < 0) return;
+    const swap = direction === "up" ? idx - 1 : idx + 1;
+    if (swap < 0 || swap >= data.pinned.length) return;
+    [data.pinned[idx], data.pinned[swap]] = [data.pinned[swap], data.pinned[idx]];
     saveData(data);
     refresh(data);
   }
@@ -1032,14 +1064,16 @@
       html += '<div class="rs-section rs-pinned-section">';
       html += '<div class="rs-section-title">\u{1F4CC} Pinned</div>';
       html += '<ul class="rs-list">';
-      for (const name of pinned) {
+      pinned.forEach((name, i) => {
         const icon = cachedIcon(name);
         html += `<li class="rs-item rs-pinned">`;
         html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(name))}" src="${escAttr(icon)}" alt="" />`;
         html += `<a href="/r/${encodeURIComponent(name)}" class="rs-link">r/${name}</a>`;
+        html += `<button class="rs-reorder-up" data-name="${escAttr(encodeURIComponent(name))}" title="Move up" ${i === 0 ? "disabled" : ""}>\u25B2</button>`;
+        html += `<button class="rs-reorder-down" data-name="${escAttr(encodeURIComponent(name))}" title="Move down" ${i === pinned.length - 1 ? "disabled" : ""}>\u25BC</button>`;
         html += `<button class="rs-unpin-btn" data-name="${escAttr(encodeURIComponent(name))}" title="Unpin">\u2715</button>`;
         html += `</li>`;
-      }
+      });
       html += "</ul></div>";
     }
     const recentFiltered = recent.filter((s) => !pinned.includes(s.name));
@@ -1598,6 +1632,12 @@
         ctl.togglePin(pin.dataset.name);
         return;
       }
+      const reorder = e.target.closest(".rs-reorder-up, .rs-reorder-down");
+      if (reorder) {
+        e.stopPropagation();
+        ctl.movePinned(reorder.dataset.name, reorder.classList.contains("rs-reorder-up") ? "up" : "down");
+        return;
+      }
       const remove = e.target.closest(".rs-remove-btn");
       if (remove) {
         e.stopPropagation();
@@ -1691,6 +1731,9 @@
   }
   function togglePin2(name) {
     togglePin(name, refreshAll);
+  }
+  function movePinned2(name, direction) {
+    movePinned(name, direction, refreshAll);
   }
   function removeVisit2(name) {
     removeVisit(name, refreshAll);
@@ -1792,6 +1835,7 @@
       buildPopupShell,
       render: renderContent2,
       togglePin: togglePin2,
+      movePinned: movePinned2,
       removeVisit: removeVisit2,
       setSettingsOpen
     });
@@ -1815,6 +1859,12 @@
       if (pin) {
         e.stopPropagation();
         togglePin2(pin.dataset.name);
+        return;
+      }
+      const reorder = e.target.closest(".rs-reorder-up, .rs-reorder-down");
+      if (reorder) {
+        e.stopPropagation();
+        movePinned2(reorder.dataset.name, reorder.classList.contains("rs-reorder-up") ? "up" : "down");
         return;
       }
       const remove = e.target.closest(".rs-remove-btn");

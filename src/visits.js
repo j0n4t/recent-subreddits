@@ -57,6 +57,21 @@ export function togglePin(name, refresh) {
 }
 
 /**
+ * Move a pinned subreddit up or down in the order, then refresh every mounted
+ * instance. No-op if the name is not pinned or the move would go out of bounds.
+ */
+export function movePinned(name, direction, refresh) {
+  const data = loadData();
+  const idx = data.pinned.indexOf(name);
+  if (idx < 0) return;
+  const swap = direction === 'up' ? idx - 1 : idx + 1;
+  if (swap < 0 || swap >= data.pinned.length) return;
+  [data.pinned[idx], data.pinned[swap]] = [data.pinned[swap], data.pinned[idx]];
+  saveData(data);
+  refresh(data);
+}
+
+/**
  * Remove a subreddit from history AND blacklist it, then refresh every mounted
  * instance.
  *

@@ -200,13 +200,19 @@ function wireInlineInstance(rec, target) {
 
   wireResizeHandle(rec, target);
 
-  // Pin/unpin, close (unbind), settings toggle — same behaviour as the popup,
-  // but scoped to this block and with no popup to open or close.
+  // Pin/unpin, reorder, close (unbind), settings toggle — same behaviour as the
+  // popup, but scoped to this block and with no popup to open or close.
   inst.addEventListener('click', (e) => {
     const pin = e.target.closest('.rs-pin-btn, .rs-unpin-btn');
     if (pin) {
       e.stopPropagation();
       ctl.togglePin(pin.dataset.name);
+      return;
+    }
+    const reorder = e.target.closest('.rs-reorder-up, .rs-reorder-down');
+    if (reorder) {
+      e.stopPropagation();
+      ctl.movePinned(reorder.dataset.name, reorder.classList.contains('rs-reorder-up') ? 'up' : 'down');
       return;
     }
     const remove = e.target.closest('.rs-remove-btn');

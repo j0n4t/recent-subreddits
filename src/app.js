@@ -7,7 +7,7 @@ import {
 
 import { checkTriggers } from './diagnostics.js';
 import { injectStyles } from './styles.js';
-import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore, removeVisit as removeVisitInStore } from './visits.js';
+import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore, removeVisit as removeVisitInStore, movePinned as movePinnedInStore } from './visits.js';
 import { harvestCurrentSubredditIcon } from './icons.js';
 import { positionPopup, positionPopupCentered } from './position.js';
 import { renderContent as renderContentInto } from './content.js';
@@ -62,6 +62,11 @@ function refreshAll(data) {
 /** Toggle a pin and repaint every instance showing it. */
 function togglePin(name) {
   togglePinInStore(name, refreshAll);
+}
+
+/** Reorder a pinned subreddit and repaint every instance showing it. */
+function movePinned(name, direction) {
+  movePinnedInStore(name, direction, refreshAll);
 }
 
 /** Drop a subreddit from history and repaint every instance showing it. */
@@ -248,6 +253,7 @@ function mountSidebar() {
     buildPopupShell,
     render: renderContent,
     togglePin,
+    movePinned,
     removeVisit,
     setSettingsOpen,
   });
@@ -285,6 +291,12 @@ function mountSidebar() {
     if (pin) {
       e.stopPropagation();
       togglePin(pin.dataset.name);
+      return;
+    }
+    const reorder = e.target.closest('.rs-reorder-up, .rs-reorder-down');
+    if (reorder) {
+      e.stopPropagation();
+      movePinned(reorder.dataset.name, reorder.classList.contains('rs-reorder-up') ? 'up' : 'down');
       return;
     }
     const remove = e.target.closest('.rs-remove-btn');

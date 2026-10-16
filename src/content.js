@@ -24,14 +24,16 @@ export function renderContent(data, instance, isMounted) {
     html += '<div class="rs-section rs-pinned-section">';
     html += '<div class="rs-section-title">📌 Pinned</div>';
     html += '<ul class="rs-list">';
-    for (const name of pinned) {
+    pinned.forEach((name, i) => {
       const icon = cachedIcon(name);
       html += `<li class="rs-item rs-pinned">`;
       html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(name))}" src="${escAttr(icon)}" alt="" />`;
       html += `<a href="/r/${encodeURIComponent(name)}" class="rs-link">r/${name}</a>`;
+      html += `<button class="rs-reorder-up" data-name="${escAttr(encodeURIComponent(name))}" title="Move up" ${i === 0 ? 'disabled' : ''}>▲</button>`;
+      html += `<button class="rs-reorder-down" data-name="${escAttr(encodeURIComponent(name))}" title="Move down" ${i === pinned.length - 1 ? 'disabled' : ''}>▼</button>`;
       html += `<button class="rs-unpin-btn" data-name="${escAttr(encodeURIComponent(name))}" title="Unpin">✕</button>`;
       html += `</li>`;
-    }
+    });
     html += '</ul></div>';
   }
 

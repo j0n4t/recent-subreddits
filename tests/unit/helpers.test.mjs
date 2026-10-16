@@ -17,7 +17,7 @@ import { parseHotkey, hotkeyMatches, comboFromEvent } from '../../src/hotkey.js'
 import { formatTimeAgo } from '../../src/time.js';
 import { getSubredditFromUrl } from '../../src/visits.js';
 import { ICON_MAX_ATTEMPTS, ICON_RETRY_DELAYS } from '../../src/icons.js';
-import { trackVisit, removeVisit } from '../../src/visits.js';
+import { trackVisit, removeVisit, movePinned, togglePin } from '../../src/visits.js';
 import { loadSettings, defaultSettings, DEFAULT_SETTINGS } from '../../src/storage.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -293,6 +293,102 @@ describe('visit tracking and the blacklist', () => {
     };
     withStore(store, () => removeVisit('webdev', () => {}));
     assert.deepEqual(readSettings(store).blocked, ['webdev'], 'still one entry');
+  });
+});
+
+describe('movePinned', () => {
+  const readPinned = (store) => JSON.parse(store.recentSubreddits).pinned;
+
+  test('moves a pinned subreddit down', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: ['a', 'b', 'c'] }),
+    };
+    let refreshed = null;
+    withStore(store, () => movePinned('a', 'down', (d) => { refreshed = d; }));
+    assert.deepEqual(readPinned(store), ['b', 'a', 'c']);
+    assert.deepEqual(refreshed.pinned, ['b', 'a', 'c'], 'refresh callback gets the new order');
+  });
+
+  test('moves a pinned subreddit up', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: ['a', 'b', 'c'] }),
+    };
+    withStore(store, () => movePinned('c', 'up', () => {}));
+    assert.deepEqual(readPinned(store), ['a', 'c', 'b']);
+  });
+
+  test('no-op when moving up from the first position', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: ['a', 'b'] }),
+    };
+    let called = false;
+    withStore(store, () => movePinned('a', 'up', () => { called = true; }));
+    assert.deepEqual(readPinned(store), ['a', 'b'], 'order unchanged');
+    assert.equal(called, false, 'refresh not called');
+  });
+
+  test('no-op when moving down from the last position', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: ['a', 'b'] }),
+    };
+    let called = false;
+    withStore(store, () => movePinned('b', 'down', () => { called = true; }));
+    assert.deepEqual(readPinned(store), ['a', 'b'], 'order unchanged');
+    assert.equal(called, false, 'refresh not called');
+  });
+
+  test('no-op for a name that is not pinned', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: ['a'] }),
+    };
+    let called = false;
+    withStore(store, () => movePinned('z', 'down', () => { called = true; }));
+    assert.deepEqual(readPinned(store), ['a'], 'order unchanged');
+    assert.equal(called, false, 'refresh not called');
+  });
+
+  test('works with a single pinned subreddit (both directions no-op)', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: ['solo'] }),
+    };
+    withStore(store, () => {
+      movePinned('solo', 'up', () => {});
+      movePinned('solo', 'down', () => {});
+    });
+    assert.deepEqual(readPinned(store), ['solo']);
+  });
+
+  test('a full reorder sequence produces the expected order', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: ['a', 'b', 'c', 'd'] }),
+    };
+    withStore(store, () => {
+      movePinned('a', 'down', () => {}); // b a c d
+      movePinned('a', 'down', () => {}); // b c a d
+      movePinned('d', 'up', () => {});   // b c d a
+      movePinned('b', 'down', () => {}); // c b d a
+    });
+    assert.deepEqual(readPinned(store), ['c', 'b', 'd', 'a']);
+  });
+});
+
+describe('togglePin', () => {
+  const readPinned = (store) => JSON.parse(store.recentSubreddits).pinned;
+
+  test('pinning adds to the front', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: ['a'] }),
+    };
+    withStore(store, () => togglePin('b', () => {}));
+    assert.deepEqual(readPinned(store), ['b', 'a']);
+  });
+
+  test('unpinning removes', () => {
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: ['a', 'b'] }),
+    };
+    withStore(store, () => togglePin('a', () => {}));
+    assert.deepEqual(readPinned(store), ['b']);
   });
 });
 

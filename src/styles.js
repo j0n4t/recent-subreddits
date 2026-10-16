@@ -384,6 +384,22 @@ export function injectStyles() {
       transition: opacity 0.15s;
     }
     .rs-pin-btn:hover, .rs-unpin-btn:hover { opacity: 1; }
+    .rs-reorder-up, .rs-reorder-down {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px;
+      font-size: 10px;
+      line-height: 1;
+      color: var(--rs-text-muted);
+      opacity: 0.5;
+      transition: opacity 0.15s;
+    }
+    .rs-reorder-up:hover, .rs-reorder-down:hover { opacity: 1; }
+    .rs-reorder-up:disabled, .rs-reorder-down:disabled {
+      opacity: 0.15;
+      cursor: default;
+    }
     /* The trash sits next to the pin and matches it, so a row's controls read as
        one group. Recent rows only — the Pinned section uses the ✕ above. */
     .rs-remove-btn {
@@ -413,15 +429,21 @@ export function injectStyles() {
        controls themselves, so the default look is untouched. */
     .rs-hide-controls .rs-pin-btn,
     .rs-hide-controls .rs-unpin-btn,
-    .rs-hide-controls .rs-remove-btn {
+    .rs-hide-controls .rs-remove-btn,
+    .rs-hide-controls .rs-reorder-up,
+    .rs-hide-controls .rs-reorder-down {
       opacity: 0;
     }
     .rs-hide-controls .rs-item:hover .rs-pin-btn,
     .rs-hide-controls .rs-item:hover .rs-unpin-btn,
     .rs-hide-controls .rs-item:hover .rs-remove-btn,
+    .rs-hide-controls .rs-item:hover .rs-reorder-up,
+    .rs-hide-controls .rs-item:hover .rs-reorder-down,
     .rs-hide-controls .rs-pin-btn:focus-visible,
     .rs-hide-controls .rs-unpin-btn:focus-visible,
-    .rs-hide-controls .rs-remove-btn:focus-visible {
+    .rs-hide-controls .rs-remove-btn:focus-visible,
+    .rs-hide-controls .rs-reorder-up:focus-visible,
+    .rs-hide-controls .rs-reorder-down:focus-visible {
       opacity: 1;
     }
     /* The main close button follows the same rule, revealed by hovering the
