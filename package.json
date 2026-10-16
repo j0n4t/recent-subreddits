@@ -1,8 +1,8 @@
 {
-  "name": "correct-reddit",
+  "name": "recent-subreddits",
   "version": "1.1.0",
   "private": true,
-  "description": "Userscript: recently visited subreddits in a popup anchored to the Reddit logo",
+  "description": "Userscript: recently visited subreddits in a popup anchored to the Reddit logo and more",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
