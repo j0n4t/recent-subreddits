@@ -14,10 +14,16 @@ export function loadData() {
     const raw = GM_getValue(STORAGE_KEY, null);
     if (!raw) return { recent: [], pinned: [] };
     const parsed = JSON.parse(raw);
-    return {
+    const data = {
       recent: Array.isArray(parsed.recent) ? parsed.recent : [],
       pinned: Array.isArray(parsed.pinned) ? parsed.pinned : [],
     };
+    // Apply the cap on read, not only on write. The write path trims, but a
+    // hand-edited or seeded store can still be over the limit — and the render
+    // layer trusts what it is handed, so without this an over-cap list would
+    // paint in full. The trim is not persisted here: a read must not write, and
+    // the next save of any kind stores the trimmed form anyway.
+    return pruneRecent(data, loadSettings().maxRecent);
   } catch {
     return { recent: [], pinned: [] };
   }
@@ -25,6 +31,41 @@ export function loadData() {
 
 export function saveData(data) {
   GM_setValue(STORAGE_KEY, JSON.stringify(data));
+}
+
+// The cap on history is user-configurable (settings.maxRecent), so the bounds
+// live here rather than only in the panel: a hand-edited store must not be able
+// to set a cap of 0 (an empty list with no explanation) or of 100000.
+export const MIN_MAX_RECENT = 1;
+export const MAX_MAX_RECENT = 200;
+
+/**
+ * Trim `data.recent` to the configured cap, in place.
+ *
+ * Pinned subreddits are exempt from the cap. A pinned row lives in the Pinned
+ * section, but its timestamp is looked up from this list (pinned entries are
+ * stored as plain names) — so slicing it away would leave the pinned row with no
+ * time while the row itself stayed on screen. The list therefore holds up to
+ * `maxRecent` unpinned entries plus one per pinned subreddit.
+ *
+ * Order is preserved: `recent` is newest-first, and the first `maxRecent`
+ * unpinned entries are the ones kept.
+ */
+export function pruneRecent(data, maxRecent) {
+  const pinned = new Set(data.pinned);
+  const kept = [];
+  let unpinned = 0;
+  for (const entry of data.recent) {
+    if (pinned.has(entry.name)) {
+      kept.push(entry);
+      continue;
+    }
+    if (unpinned >= maxRecent) continue;
+    kept.push(entry);
+    unpinned++;
+  }
+  data.recent = kept;
+  return data;
 }
 
 // ---------- Icons ----------
@@ -86,6 +127,11 @@ export const DEFAULT_SETTINGS = {
   // Opt-in: a tidy list by default, with each row's pin/trash (and the panel's
   // close button) appearing only while its row is hovered.
   hideRowControls: false,
+  // Opt-out: show relative timestamps by default; uncheck to hide them.
+  showTimestamps: true,
+  // How many visited subreddits history keeps. The list is trimmed to this on
+  // every visit, so lowering it also prunes what is already stored.
+  maxRecent: MAX_RECENT,
 };
 
 /**
@@ -149,6 +195,30 @@ function normalizeBlocked(raw) {
   return out;
 }
 
+/**
+ * The history cap, clamped to a sane range.
+ *
+ * `null`, an empty string and a non-numeric string all fall back to the default
+ * rather than to a value that would empty the list. The check is explicit
+ * because `Number(null)` and `Number('')` are both 0, which would otherwise
+ * resolve to the minimum instead of the default.
+ *
+ * Exported so the settings panel writes a clamped value rather than storing junk
+ * and relying on the read path to tidy it up.
+ */
+export function clampMaxRecent(raw) {
+  let n;
+  if (typeof raw === 'number') n = raw;
+  else if (typeof raw === 'string' && raw.trim()) n = Number(raw);
+  else return DEFAULT_SETTINGS.maxRecent;
+
+  if (!Number.isFinite(n)) return DEFAULT_SETTINGS.maxRecent;
+  const int = Math.floor(n);
+  if (int < MIN_MAX_RECENT) return MIN_MAX_RECENT;
+  if (int > MAX_MAX_RECENT) return MAX_MAX_RECENT;
+  return int;
+}
+
 export function loadSettings() {
   try {
     const raw = GM_getValue(SETTINGS_KEY, null);
@@ -171,6 +241,8 @@ export function loadSettings() {
       // Strict boolean: anything else (a hand-edited "true" string, a null)
       // falls back to the default rather than becoming truthy by accident.
       hideRowControls: parsed.hideRowControls === true,
+      showTimestamps: parsed.showTimestamps !== false,
+      maxRecent: clampMaxRecent(parsed.maxRecent),
     };
   } catch {
     return defaultSettings();

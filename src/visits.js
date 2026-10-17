@@ -3,7 +3,7 @@
 // The writes that change what the list shows. All re-render every mounted
 // instance afterwards, which is why they take a `refresh` callback rather than
 // importing the render layer themselves.
-import { loadData, saveData, loadSettings, saveSettings, MAX_RECENT } from './storage.js';
+import { loadData, saveData, loadSettings, saveSettings, pruneRecent } from './storage.js';
 export function getSubredditFromUrl() {
   const path = window.location.pathname;
   // Matches /r/subreddit/... or /r/subreddit
@@ -38,8 +38,8 @@ export function trackVisit(name) {
     name,
     visitedAt: Date.now(),
   });
-  // Trim
-  data.recent = data.recent.slice(0, MAX_RECENT);
+  // Trim to the configured cap, keeping pinned entries' timestamps intact.
+  pruneRecent(data, loadSettings().maxRecent);
   saveData(data);
 }
 

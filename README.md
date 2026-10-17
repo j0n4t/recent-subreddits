@@ -5,7 +5,7 @@ anchored to Reddit's logo, with the ability to pin favorites for quick access.
 
 ## Features
 
-- Automatically tracks subreddits you visit (up to 15 recent)
+- Automatically tracks subreddits you visit (15 by default, configurable 1–200)
 - Popup opens on hover or click of the Reddit logo / menu button, positioned
   relative to whichever element triggered it (flips above when there is no room below)
 - Shows each subreddit's community icon
@@ -44,6 +44,13 @@ anchored to Reddit's logo, with the ability to pin favorites for quick access.
 - **Hide row controls until hover**: a settings option that keeps each row's 📌 and
   🗑, and the header's ✕, invisible until you hover the row they belong to. Off by
   default.
+- **Show timestamps**: a settings option that toggles the relative-time labels
+  (e.g. "5m ago") next to each subreddit in the Recent and Pinned lists. On by
+  default.
+- **Recent history size**: a settings option for how many recently visited
+  subreddits to keep (1–200, default 15). Pinned subreddits are always kept on
+  top of this, so they never count against the limit. Lowering it prunes the
+  stored history immediately.
 
 The popup is sized to the space it has: it is capped to the room below (or above)
 its trigger and scrolls internally when its content is taller, so it never runs off

@@ -18,7 +18,7 @@ import { formatTimeAgo } from '../../src/time.js';
 import { getSubredditFromUrl } from '../../src/visits.js';
 import { ICON_MAX_ATTEMPTS, ICON_RETRY_DELAYS } from '../../src/icons.js';
 import { trackVisit, removeVisit, movePinned, togglePin } from '../../src/visits.js';
-import { loadSettings, defaultSettings, DEFAULT_SETTINGS } from '../../src/storage.js';
+import { loadSettings, defaultSettings, DEFAULT_SETTINGS, pruneRecent, MIN_MAX_RECENT, MAX_MAX_RECENT } from '../../src/storage.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUILT = join(HERE, '..', '..', 'recent-subreddits.user.js');
@@ -294,6 +294,81 @@ describe('visit tracking and the blacklist', () => {
     withStore(store, () => removeVisit('webdev', () => {}));
     assert.deepEqual(readSettings(store).blocked, ['webdev'], 'still one entry');
   });
+
+  test('history is capped at the configured maxRecent', () => {
+    // The cap used to be the MAX_RECENT constant; it is a setting now, and this
+    // is the path that actually applies it.
+    const store = {
+      recentSubreddits: JSON.stringify({ recent: [], pinned: [] }),
+      recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], maxRecent: 3 }),
+    };
+    withStore(store, () => {
+      for (const n of ['a', 'b', 'c', 'd', 'e']) trackVisit(n);
+    });
+    assert.deepEqual(
+      readData(store).recent.map((r) => r.name),
+      ['e', 'd', 'c'],
+      'the newest entries must survive and the rest be dropped'
+    );
+  });
+
+  test('a pinned subreddit does not count against the cap, and keeps its timestamp', () => {
+    // The bug this guards: pinned entries are stored as plain names, and their
+    // timestamp is looked up from `recent`. A plain slice would evict the pinned
+    // entry's history record, leaving the pinned row on screen with no time
+    // while its timestamp silently vanished.
+    const store = {
+      recentSubreddits: JSON.stringify({
+        recent: [
+          { name: 'pinned-one', visitedAt: 111 },
+          { name: 'fresh', visitedAt: 999 },
+          { name: 'old', visitedAt: 1 },
+        ],
+        pinned: ['pinned-one'],
+      }),
+      recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], maxRecent: 1 }),
+    };
+    withStore(store, () => trackVisit('newest'));
+
+    const recent = readData(store).recent;
+    assert.deepEqual(
+      recent.map((r) => r.name),
+      ['newest', 'pinned-one'],
+      'one unpinned entry plus the pinned one, which is exempt'
+    );
+    const kept = recent.find((r) => r.name === 'pinned-one');
+    assert.equal(kept.visitedAt, 111, "the pinned entry's timestamp must be preserved");
+  });
+});
+
+describe('pruneRecent', () => {
+  const entries = (names) => names.map((name, i) => ({ name, visitedAt: 1000 - i }));
+
+  test('keeps the newest `maxRecent` unpinned entries, in order', () => {
+    const data = { recent: entries(['a', 'b', 'c', 'd']), pinned: [] };
+    pruneRecent(data, 2);
+    assert.deepEqual(data.recent.map((r) => r.name), ['a', 'b']);
+  });
+
+  test('never drops a pinned entry, wherever it sits in the list', () => {
+    // Not just the head: a pinned subreddit visited long ago sits at the tail and
+    // is exactly the one a plain slice would evict.
+    const data = { recent: entries(['a', 'b', 'c', 'pinned']), pinned: ['pinned'] };
+    pruneRecent(data, 1);
+    assert.deepEqual(data.recent.map((r) => r.name), ['a', 'pinned']);
+  });
+
+  test('is a no-op when the list is already within the cap', () => {
+    const data = { recent: entries(['a', 'b']), pinned: [] };
+    pruneRecent(data, 5);
+    assert.deepEqual(data.recent.map((r) => r.name), ['a', 'b']);
+  });
+
+  test('a cap larger than the list keeps everything', () => {
+    const data = { recent: entries(['a', 'b', 'c']), pinned: ['c'] };
+    pruneRecent(data, MAX_MAX_RECENT);
+    assert.equal(data.recent.length, 3);
+  });
 });
 
 describe('movePinned', () => {
@@ -448,6 +523,51 @@ describe('the built-in trigger as a default setting', () => {
 
     const on = { recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], hideRowControls: true }) };
     assert.equal(withStore(on, () => loadSettings()).hideRowControls, true, 'an explicit true must be kept');
+  });
+
+  test('showTimestamps is opt-out, and a malformed value falls back to on', () => {
+    // On by default: timestamps are useful unless the user explicitly hides them.
+    assert.equal(DEFAULT_SETTINGS.showTimestamps, true, 'the option must default to on');
+    assert.equal(defaultSettings().showTimestamps, true, 'and reset must restore on');
+
+    const cases = [
+      ['absent', { hotkey: 'Alt+Shift+R', targets: [] }],
+      ['a string "false"', { hotkey: 'Alt+Shift+R', targets: [], showTimestamps: 'false' }],
+      ['null', { hotkey: 'Alt+Shift+R', targets: [], showTimestamps: null }],
+    ];
+    for (const [label, stored] of cases) {
+      const store = { recentSubredditsSettings: JSON.stringify(stored) };
+      const s = withStore(store, () => loadSettings());
+      assert.equal(s.showTimestamps, true, `${label} must resolve to on`);
+    }
+
+    const off = { recentSubredditsSettings: JSON.stringify({ hotkey: 'Alt+Shift+R', targets: [], showTimestamps: false }) };
+    assert.equal(withStore(off, () => loadSettings()).showTimestamps, false, 'an explicit false must be kept');
+  });
+
+  test('maxRecent is clamped to a sane range, and junk falls back to the default', () => {
+    assert.equal(DEFAULT_SETTINGS.maxRecent, 15, 'the default must match the old constant');
+    assert.equal(defaultSettings().maxRecent, 15, 'and reset must restore it');
+
+    const cases = [
+      ['absent', { hotkey: 'Alt+Shift+R', targets: [] }, 15],
+      ['a non-numeric string', { hotkey: 'Alt+Shift+R', targets: [], maxRecent: 'lots' }, 15],
+      ['null', { hotkey: 'Alt+Shift+R', targets: [], maxRecent: null }, 15],
+      ['an empty string', { hotkey: 'Alt+Shift+R', targets: [], maxRecent: '' }, 15],
+      ['0', { hotkey: 'Alt+Shift+R', targets: [], maxRecent: 0 }, MIN_MAX_RECENT],
+      ['a negative', { hotkey: 'Alt+Shift+R', targets: [], maxRecent: -5 }, MIN_MAX_RECENT],
+      ['absurdly large', { hotkey: 'Alt+Shift+R', targets: [], maxRecent: 1e6 }, MAX_MAX_RECENT],
+      ['a numeric string', { hotkey: 'Alt+Shift+R', targets: [], maxRecent: '8' }, 8],
+      ['a float', { hotkey: 'Alt+Shift+R', targets: [], maxRecent: 7.9 }, 7],
+    ];
+    for (const [label, stored, expected] of cases) {
+      const store = { recentSubredditsSettings: JSON.stringify(stored) };
+      assert.equal(
+        withStore(store, () => loadSettings()).maxRecent,
+        expected,
+        `${label} must resolve to ${expected}`
+      );
+    }
   });
 
   test('defaultSettings() returns a fresh copy, never the shared object', () => {

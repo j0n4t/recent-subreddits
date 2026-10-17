@@ -73,9 +73,10 @@ appears in `src/`.
 
 **Why it matters.** Because the fixture has no `/r/<name>/` path, `trackVisit()`
 never runs in e2e — the "a blacklisted subreddit is never tracked again" test had
-to move to the unit suite. The harvest's SPA staleness window is also simulated
-with a `?subStale=` flag rather than a real navigation. Both are the code most
-likely to break silently on a Reddit change.
+to move to the unit suite, and so did the "a visit trims to the configured cap"
+case. The harvest's SPA staleness window is also simulated with a `?subStale=`
+flag rather than a real navigation. Both are the code most likely to break
+silently on a Reddit change.
 
 **Fix.** Serve the fixture over a tiny static server in `cdp-harness.mjs` so
 `location.pathname` is real.
@@ -148,16 +149,7 @@ configuration is meaningful.
 
 ---
 
-## 10. Relative timestamps freeze while the popup is open
-
-**Why it matters.** `formatTimeAgo` runs at render only, so an open popup keeps
-showing "just now" indefinitely.
-
-**Done when.** An open popup's timestamps age.
-
----
-
-## 11. An inline target that matches nothing is silent
+## 10. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming

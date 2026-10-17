@@ -4,7 +4,7 @@
 // whichever instance opened it (the popup or an inline block), so the instance
 // and a small controller surface are passed in rather than closed over — that
 // keeps this module free of an import cycle with the mount code.
-import { loadSettings, saveSettings, defaultSettings, DEFAULT_SETTINGS } from './storage.js';
+import { loadSettings, saveSettings, defaultSettings, DEFAULT_SETTINGS, MIN_MAX_RECENT, MAX_MAX_RECENT, clampMaxRecent, pruneRecent, loadData, saveData } from './storage.js';
 import { escAttr } from './icons.js';
 import { parseHotkey, comboFromEvent } from './hotkey.js';
 import { startPicker } from './picker.js';
@@ -133,6 +133,24 @@ export function renderSettingsPanel(instance, ctl, openSection) {
             </label>
             <div class="rs-hint">Hides each row's 📌 and 🗑, and the ✕ in the header,
               until you hover the row they belong to. Keeps the list uncluttered.</div>
+          </div>
+          <div class="rs-field">
+            <label class="rs-check">
+              <input type="checkbox" class="rs-checkbox" data-role="show-timestamps"
+                     ${settings.showTimestamps ? 'checked' : ''} />
+              <span>Show timestamps</span>
+            </label>
+            <div class="rs-hint">Shows relative timestamps (e.g. "5m ago") next to each
+              subreddit in the Recent and Pinned lists. Uncheck for a cleaner look.</div>
+          </div>
+          <div class="rs-field">
+            <label class="rs-label" for="rs-max-recent">Recent history size</label>
+            <input class="rs-input rs-number-input" id="rs-max-recent" type="number"
+                   data-role="max-recent" min="${MIN_MAX_RECENT}" max="${MAX_MAX_RECENT}"
+                   step="1" value="${settings.maxRecent}" />
+            <div class="rs-hint">How many recently visited subreddits to keep
+              (${MIN_MAX_RECENT}–${MAX_MAX_RECENT}). Pinned subreddits are always kept
+              on top of this, so they never count against the limit.</div>
           </div>
         </div>
       </div>
@@ -321,6 +339,37 @@ export function renderSettingsPanel(instance, ctl, openSection) {
     saveSettings({ ...loadSettings(), hideRowControls: on });
     ctl.applyControlVisibility();
     say(on ? 'Row controls will show on hover.' : 'Row controls are always shown.');
+  });
+
+  // ---- Show timestamps ----
+  panel.querySelector('[data-role="show-timestamps"]').addEventListener('change', (e) => {
+    e.stopPropagation();
+    const on = e.target.checked;
+    saveSettings({ ...loadSettings(), showTimestamps: on });
+    ctl.refreshList();
+    say(on ? 'Timestamps will be shown.' : 'Timestamps will be hidden.');
+  });
+
+  // ---- Recent history size ----
+  // Saved on `change` (blur / Enter) rather than per keystroke, so a half-typed
+  // number is never stored. Lowering the cap prunes what is already stored right
+  // away — otherwise the setting would look broken until the next visit, and a
+  // list left over the limit would still render in full.
+  const maxRecentInput = panel.querySelector('[data-role="max-recent"]');
+  maxRecentInput.addEventListener('keydown', (e) => {
+    // The popup's global handler must not read a digit typed here as a shortcut.
+    e.stopPropagation();
+  });
+  maxRecentInput.addEventListener('change', () => {
+    // Clamp before storing, so the persisted value is the one that will be
+    // applied — a junk or out-of-range entry must not be written through and
+    // only tidied up on the next read.
+    const applied = clampMaxRecent(maxRecentInput.value);
+    saveSettings({ ...loadSettings(), maxRecent: applied });
+    maxRecentInput.value = String(applied);
+    saveData(pruneRecent(loadData(), applied));
+    ctl.refreshList();
+    say(`Keeping up to ${applied} recent subreddit(s).`);
   });
 
   panel.querySelector('[data-role="reset"]').addEventListener('click', (e) => {

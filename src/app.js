@@ -24,6 +24,10 @@ let sidebarEl = null;
 let popupEl = null; // persistent; rebuilt content goes inside #rs-content
 let settingsOpen = false;
 
+// Periodic refresh while the popup is open so timestamps age.
+let refreshTimer = null;
+const REFRESH_INTERVAL_MS = 30_000;
+
 function isSettingsOpen() {
   return settingsOpen;
 }
@@ -148,7 +152,7 @@ function buildPopupShell() {
 
 /** The list renders into whichever instance is given; the popup by default. */
 function renderContent(data, instance) {
-  renderContentInto(data, instance || popupEl, () => !!sidebarEl);
+  renderContentInto(data, instance || popupEl, () => !!sidebarEl, loadSettings().showTimestamps);
 }
 
 /**
@@ -189,6 +193,24 @@ let activeHotkey = null;
 // without the caller having to pass the trigger again.
 let lastTrigger = null;
 
+// ---------- Timestamp aging ----------
+// formatTimeAgo runs at render only, so without a refresh an open popup keeps
+// showing "just now" indefinitely. A 30s interval re-renders the list while the
+// popup is visible, which keeps the timestamps honest without being wasteful.
+function startRefreshTimer() {
+  if (refreshTimer) return;
+  refreshTimer = setInterval(() => {
+    if (isPopupVisible()) refreshList();
+  }, REFRESH_INTERVAL_MS);
+}
+
+function stopRefreshTimer() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
 // ---------- Popup toggle ----------
 function togglePopup(show, trigger) {
   if (!popupEl) return;
@@ -202,8 +224,10 @@ function togglePopup(show, trigger) {
     popupEl.classList.add('visible');
     if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(popupEl, lastTrigger);
     else positionPopupCentered(popupEl);
+    startRefreshTimer();
   } else {
     popupEl.classList.remove('visible');
+    stopRefreshTimer();
     // Never leave the settings modal open behind a closed popup.
     setSettingsOpen(false);
   }

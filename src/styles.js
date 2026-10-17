@@ -157,6 +157,11 @@ export function injectStyles() {
       font-family: monospace;
       line-height: 1.5;
     }
+    /* A numeric field is not clickable-to-edit the way the hotkey field is. */
+    .rs-number-input {
+      cursor: text;
+      width: 80px;
+    }
     .rs-hint {
       font-size: 11px;
       color: var(--rs-text-muted);

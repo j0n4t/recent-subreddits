@@ -1368,6 +1368,340 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
   });
 
+  /** The relative-time labels actually painted in each section. */
+  const TIMES = run((popupSel) => {
+    const q = (s) => Array.from(document.querySelectorAll(popupSel + ' ' + s));
+    const text = (el) => el.textContent.trim();
+    return {
+      recent: q('.rs-section:not(.rs-pinned-section) .rs-item .rs-time').map(text),
+      pinned: q('.rs-pinned-section .rs-item .rs-time').map(text),
+      recentRows: q('.rs-section:not(.rs-pinned-section) .rs-item').length,
+      pinnedRows: q('.rs-pinned-section .rs-item').length,
+    };
+  }, POPUP);
+
+  test('timestamps: shown by default, on both Recent and Pinned rows', async () => {
+    await open();
+    await openPopup();
+
+    const times = await b.evaluate(TIMES);
+    assert.ok(times.recent.length > 0, 'the Recent rows must show a time by default');
+    assert.ok(times.pinned.length > 0, 'the Pinned row must show a time by default too');
+    // The seed pins r/linux, whose timestamp lives in `recent` — the lookup that
+    // makes a pinned row show a time at all.
+    assert.match(times.pinned[0], /ago|just now/, `expected a relative time, got "${times.pinned[0]}"`);
+  });
+
+  test('timestamps: seeding the option off removes the labels entirely', async () => {
+    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&settings=${settingsParam({ showTimestamps: false })}`);
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+
+    const times = await b.evaluate(TIMES);
+    assert.equal(times.recent.length, 0, 'no Recent row may carry a time');
+    assert.equal(times.pinned.length, 0, 'nor a Pinned row');
+    // The rows themselves must still be there — the option hides the label, not
+    // the entry.
+    assert.ok(times.recentRows > 0, 'the Recent rows must still render');
+    assert.ok(times.pinnedRows > 0, 'the Pinned rows must still render');
+  });
+
+  test('timestamps: the settings checkbox persists the choice', async () => {
+    await open();
+    await openSettings();
+
+    assert.equal(
+      await b.evaluate(run(() => document.querySelector('[data-role="show-timestamps"]').checked)),
+      true,
+      'the checkbox must reflect the default'
+    );
+
+    await b.evaluate(run(() => {
+      const cb = document.querySelector('[data-role="show-timestamps"]');
+      cb.checked = false;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }));
+
+    assert.equal(
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).showTimestamps,
+      false,
+      'the choice must be persisted'
+    );
+
+    // Applied to the live list, not only on the next mount. The panel is open,
+    // so close it to read the list view the user would see.
+    await b.evaluate(run(() => document.querySelector('.rs-back-btn').click()));
+    await b.waitUntil(
+      run((popupSel) => !document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
+      'settings to close'
+    );
+    assert.equal(
+      (await b.evaluate(TIMES)).recent.length,
+      0,
+      'the labels must disappear without a reopen'
+    );
+
+    // Reset restores it — a restore, not a wipe.
+    await openPanel('settings to reopen');
+    await b.evaluate(run(() => document.querySelector('[data-role="reset"]').click()));
+    assert.equal(
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).showTimestamps,
+      true,
+      'reset must turn them back on'
+    );
+  });
+
+  test('timestamps: age while the popup stays open', async () => {
+    // Tech debt #10: formatTimeAgo ran at render only, so an open popup showed
+    // "just now" forever. The fix is a periodic re-render, and this observes a
+    // REAL tick of that timer — ?fastIntervals=100 divides the 30s interval down
+    // to 300ms of actual elapsed time, so nothing here is simulated.
+    await b.goto(
+      `${fixtureUrl({ recent: [{ name: 'aging', visitedAt: Date.now() }], pinned: [] })}&fastIntervals=100`
+    );
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    // Opening the popup is what starts the refresh timer.
+    await openPopup();
+
+    const readTime = run((popupSel) => {
+      const el = document.querySelector(popupSel + ' .rs-time');
+      return el ? el.textContent.trim() : null;
+    }, POPUP);
+
+    assert.equal(await b.evaluate(readTime), 'just now', 'a visit from now must read "just now"');
+
+    // Backdate the stored visit. Nothing touches the DOM from here on — if the
+    // label changes, the timer is what changed it.
+    await b.evaluate(run(() => {
+      const data = JSON.parse(window.__store.recentSubreddits);
+      data.recent[0].visitedAt = Date.now() - 5 * 60_000;
+      window.__store.recentSubreddits = JSON.stringify(data);
+      return true;
+    }));
+
+    await b.waitUntil(
+      run((popupSel) => {
+        const el = document.querySelector(popupSel + ' .rs-time');
+        return !!el && el.textContent.trim() === '5m ago';
+      }, POPUP),
+      'the open popup to re-render the aged timestamp'
+    );
+  });
+
+  test('timestamps: the refresh timer stops when the popup closes', async () => {
+    // The timer is started on open; leaving it running would re-render a hidden
+    // popup forever. A re-render replaces .rs-content's innerHTML, so a marker
+    // attribute set on a row survives exactly when no re-render happened — which
+    // makes "the timer stopped" directly observable, with the open case as the
+    // positive control in the same test.
+    await b.goto(
+      `${fixtureUrl({ recent: [{ name: 'aging', visitedAt: Date.now() }], pinned: [] })}&fastIntervals=100`
+    );
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+
+    // One interval is 300ms at this divisor; several make the wait unambiguous.
+    const TICK_MS = 300;
+    const MARK = 'data-probe';
+    const markerSurvives = run((args) => {
+      const [popupSel, mark] = args;
+      const el = document.querySelector(popupSel + ' .rs-time');
+      return !!el && el.getAttribute(mark) === '1';
+    }, [POPUP, MARK]);
+    const setMarker = run((args) => {
+      const [popupSel, mark] = args;
+      const el = document.querySelector(popupSel + ' .rs-time');
+      if (el) el.setAttribute(mark, '1');
+      return true;
+    }, [POPUP, MARK]);
+
+    // Control: while OPEN, the timer re-renders and the marker is wiped.
+    await b.evaluate(setMarker);
+    await new Promise((r) => setTimeout(r, TICK_MS * 3));
+    assert.equal(
+      await b.evaluate(markerSurvives),
+      false,
+      'while open, the periodic refresh must re-render the list'
+    );
+
+    // Now closed: the marker must survive, i.e. nothing re-rendered.
+    await b.evaluate(run(() => document.querySelector('.rs-close-btn').click()));
+    await b.waitUntil(
+      run((popupSel) => !document.querySelector(popupSel).classList.contains('visible'), POPUP),
+      'popup to close'
+    );
+    await b.evaluate(setMarker);
+    await new Promise((r) => setTimeout(r, TICK_MS * 3));
+    assert.equal(
+      await b.evaluate(markerSurvives),
+      true,
+      'a closed popup must not be re-rendered — the timer has to stop'
+    );
+  });
+
+  /** The subreddit names painted in each section, in order, without the r/ prefix. */
+  const NAMES = run((popupSel) => {
+    const q = (s) => Array.from(document.querySelectorAll(popupSel + ' ' + s));
+    const bare = (el) => el.textContent.trim().replace(/^r\//, '');
+    return {
+      recent: q('.rs-section:not(.rs-pinned-section) .rs-link').map(bare),
+      pinned: q('.rs-pinned-section .rs-link').map(bare),
+    };
+  }, POPUP);
+
+  test('history size: lowering the cap prunes the stored list immediately', async () => {
+    // A seed well over the cap, so the setting has something to cut.
+    const seed = {
+      recent: Array.from({ length: 8 }, (_, i) => ({ name: `sub${i}`, visitedAt: Date.now() - i * 60_000 })),
+      pinned: [],
+    };
+    await b.goto(`${fixtureUrl(seed)}&settings=${settingsParam({ maxRecent: 8 })}`);
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+
+    assert.equal((await b.evaluate(NAMES)).recent.length, 8, 'all 8 must render to start');
+
+    // Lower it through the real settings control.
+    await openPanel();
+    await b.evaluate(run(() => {
+      const headers = document.querySelectorAll('.rs-acc-header');
+      headers[headers.length - 1].click(); // Display options is the last section
+      return true;
+    }));
+    await b.evaluate(run(() => {
+      const input = document.querySelector('[data-role="max-recent"]');
+      input.value = '3';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }));
+
+    assert.equal(
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).maxRecent,
+      3,
+      'the choice must be persisted'
+    );
+    // Pruned in the store, not merely hidden by the renderer.
+    assert.equal(
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubreddits))).recent.length,
+      3,
+      'lowering the cap must prune what is already stored'
+    );
+
+    await b.evaluate(run(() => document.querySelector('.rs-back-btn').click()));
+    await b.waitUntil(
+      run((popupSel) => !document.querySelector(popupSel).classList.contains('settings-open'), POPUP),
+      'settings to close'
+    );
+    const names = (await b.evaluate(NAMES)).recent;
+    assert.equal(names.length, 3, 'the list must shrink to the cap');
+    assert.deepEqual(names, ['sub0', 'sub1', 'sub2'], 'and keep the newest, in order');
+  });
+
+  test('history size: pinned subreddits are exempt from the cap', async () => {
+    // The pinned row must survive a cap that would otherwise cut it, and it must
+    // not consume one of the unpinned slots.
+    const seed = {
+      recent: [
+        { name: 'newest', visitedAt: Date.now() },
+        { name: 'older', visitedAt: Date.now() - 60_000 },
+        { name: 'oldest-pinned', visitedAt: Date.now() - 120_000 },
+      ],
+      pinned: ['oldest-pinned'],
+    };
+    await b.goto(`${fixtureUrl(seed)}&settings=${settingsParam({ maxRecent: 1 })}`);
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+
+    const names = await b.evaluate(NAMES);
+    assert.deepEqual(names.pinned, ['oldest-pinned'], 'the pinned row must still be there');
+    assert.deepEqual(
+      names.recent,
+      ['newest'],
+      'and the cap must apply to the unpinned rows only'
+    );
+
+    // Its timestamp must survive too — that is the data a plain slice would drop.
+    const times = await b.evaluate(TIMES);
+    assert.equal(times.pinned.length, 1, 'the pinned row must still show a time');
+    assert.match(times.pinned[0], /ago|just now/, `expected a relative time, got "${times.pinned[0]}"`);
+  });
+
+  test('history size: an over-cap stored list is trimmed on read, not just on write', async () => {
+    // A store seeded over the cap (a hand-edit, or a list written before the cap
+    // was lowered). The write path is not involved here, so this is what proves
+    // loadData() applies the cap — otherwise the list would paint in full.
+    //
+    // Note: the visit-write path itself cannot be driven here. The fixture is a
+    // file:// page, so location.pathname has no /r/<name>/ and trackVisit() never
+    // runs — tech debt #4. That path is covered by the unit suite instead.
+    const seed = {
+      recent: Array.from({ length: 6 }, (_, i) => ({ name: `sub${i}`, visitedAt: Date.now() - i * 60_000 })),
+      pinned: ['sub5'],
+    };
+    await b.goto(`${fixtureUrl(seed)}&settings=${settingsParam({ maxRecent: 2 })}`);
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+
+    const names = await b.evaluate(NAMES);
+    assert.deepEqual(names.recent, ['sub0', 'sub1'], 'only the newest unpinned rows may render');
+    assert.deepEqual(names.pinned, ['sub5'], 'and the pinned row must be exempt');
+  });
+
+  test('history size: the input reflects the default and rejects junk', async () => {
+    await open();
+    await openSettings();
+    await b.evaluate(run(() => {
+      const headers = document.querySelectorAll('.rs-acc-header');
+      headers[headers.length - 1].click();
+      return true;
+    }));
+
+    assert.equal(
+      await b.evaluate(run(() => document.querySelector('[data-role="max-recent"]').value)),
+      '15',
+      'the field must show the default cap'
+    );
+
+    // A junk value falls back to the default rather than emptying the list, and
+    // the field is rewritten so the user sees what was actually applied.
+    await b.evaluate(run(() => {
+      const input = document.querySelector('[data-role="max-recent"]');
+      input.value = 'not-a-number';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }));
+
+    assert.equal(
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).maxRecent,
+      15,
+      'junk must fall back to the default'
+    );
+    assert.equal(
+      await b.evaluate(run(() => document.querySelector('[data-role="max-recent"]').value)),
+      '15',
+      'and the field must show the applied value'
+    );
+
+    // An out-of-range value is clamped, and the field shows the clamped number.
+    await b.evaluate(run(() => {
+      const input = document.querySelector('[data-role="max-recent"]');
+      input.value = '0';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }));
+    assert.equal(
+      JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings))).maxRecent,
+      1,
+      '0 must clamp to the minimum'
+    );
+    assert.equal(
+      await b.evaluate(run(() => document.querySelector('[data-role="max-recent"]').value)),
+      '1',
+      'and the field must show the clamped value'
+    );
+  });
+
   test('close button sits at the end of the header row, aligned with the popup edge', async () => {
     await open();
     await openPopup();

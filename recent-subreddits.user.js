@@ -82,16 +82,35 @@
       const raw = GM_getValue(STORAGE_KEY, null);
       if (!raw) return { recent: [], pinned: [] };
       const parsed = JSON.parse(raw);
-      return {
+      const data = {
         recent: Array.isArray(parsed.recent) ? parsed.recent : [],
         pinned: Array.isArray(parsed.pinned) ? parsed.pinned : []
       };
+      return pruneRecent(data, loadSettings().maxRecent);
     } catch {
       return { recent: [], pinned: [] };
     }
   }
   function saveData(data) {
     GM_setValue(STORAGE_KEY, JSON.stringify(data));
+  }
+  var MIN_MAX_RECENT = 1;
+  var MAX_MAX_RECENT = 200;
+  function pruneRecent(data, maxRecent) {
+    const pinned = new Set(data.pinned);
+    const kept = [];
+    let unpinned = 0;
+    for (const entry of data.recent) {
+      if (pinned.has(entry.name)) {
+        kept.push(entry);
+        continue;
+      }
+      if (unpinned >= maxRecent) continue;
+      kept.push(entry);
+      unpinned++;
+    }
+    data.recent = kept;
+    return data;
   }
   var ICONS_KEY = "recentSubredditsIcons";
   var MAX_ICONS = 200;
@@ -125,7 +144,12 @@
     blocked: [],
     // Opt-in: a tidy list by default, with each row's pin/trash (and the panel's
     // close button) appearing only while its row is hovered.
-    hideRowControls: false
+    hideRowControls: false,
+    // Opt-out: show relative timestamps by default; uncheck to hide them.
+    showTimestamps: true,
+    // How many visited subreddits history keeps. The list is trimmed to this on
+    // every visit, so lowering it also prunes what is already stored.
+    maxRecent: MAX_RECENT
   };
   function defaultSettings() {
     return {
@@ -165,6 +189,17 @@
     }
     return out;
   }
+  function clampMaxRecent(raw) {
+    let n;
+    if (typeof raw === "number") n = raw;
+    else if (typeof raw === "string" && raw.trim()) n = Number(raw);
+    else return DEFAULT_SETTINGS.maxRecent;
+    if (!Number.isFinite(n)) return DEFAULT_SETTINGS.maxRecent;
+    const int = Math.floor(n);
+    if (int < MIN_MAX_RECENT) return MIN_MAX_RECENT;
+    if (int > MAX_MAX_RECENT) return MAX_MAX_RECENT;
+    return int;
+  }
   function loadSettings() {
     try {
       const raw = GM_getValue(SETTINGS_KEY, null);
@@ -180,7 +215,9 @@
         blocked: normalizeBlocked(parsed.blocked),
         // Strict boolean: anything else (a hand-edited "true" string, a null)
         // falls back to the default rather than becoming truthy by accident.
-        hideRowControls: parsed.hideRowControls === true
+        hideRowControls: parsed.hideRowControls === true,
+        showTimestamps: parsed.showTimestamps !== false,
+        maxRecent: clampMaxRecent(parsed.maxRecent)
       };
     } catch {
       return defaultSettings();
@@ -374,6 +411,11 @@
       min-height: 56px;
       font-family: monospace;
       line-height: 1.5;
+    }
+    /* A numeric field is not clickable-to-edit the way the hotkey field is. */
+    .rs-number-input {
+      cursor: text;
+      width: 80px;
     }
     .rs-hint {
       font-size: 11px;
@@ -817,7 +859,7 @@
       name,
       visitedAt: Date.now()
     });
-    data.recent = data.recent.slice(0, MAX_RECENT);
+    pruneRecent(data, loadSettings().maxRecent);
     saveData(data);
   }
   function togglePin(name, refresh) {
@@ -1054,11 +1096,12 @@
   }
 
   // src/content.js
-  function renderContent(data, instance, isMounted) {
+  function renderContent(data, instance, isMounted, showTimestamps = true) {
     if (!instance) return;
     const content = instance.querySelector(".rs-content");
     if (!content) return;
     const { recent, pinned } = data;
+    const visitedAtByName = new Map(recent.map((s) => [s.name, s.visitedAt]));
     let html = "";
     if (pinned.length > 0) {
       html += '<div class="rs-section rs-pinned-section">';
@@ -1069,6 +1112,12 @@
         html += `<li class="rs-item rs-pinned">`;
         html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(name))}" src="${escAttr(icon)}" alt="" />`;
         html += `<a href="/r/${encodeURIComponent(name)}" class="rs-link">r/${name}</a>`;
+        if (showTimestamps) {
+          const visitedAt = visitedAtByName.get(name);
+          if (visitedAt) {
+            html += `<span class="rs-time">${formatTimeAgo(visitedAt)}</span>`;
+          }
+        }
         html += `<button class="rs-reorder-up" data-name="${escAttr(encodeURIComponent(name))}" title="Move up" ${i === 0 ? "disabled" : ""}>\u25B2</button>`;
         html += `<button class="rs-reorder-down" data-name="${escAttr(encodeURIComponent(name))}" title="Move down" ${i === pinned.length - 1 ? "disabled" : ""}>\u25BC</button>`;
         html += `<button class="rs-unpin-btn" data-name="${escAttr(encodeURIComponent(name))}" title="Unpin">\u2715</button>`;
@@ -1082,12 +1131,14 @@
       html += '<div class="rs-section-title">\u{1F550} Recent</div>';
       html += '<ul class="rs-list">';
       for (const sub of recentFiltered) {
-        const timeAgo = formatTimeAgo(sub.visitedAt);
         const icon = cachedIcon(sub.name);
         html += `<li class="rs-item">`;
         html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(sub.name))}" src="${escAttr(icon)}" alt="" />`;
         html += `<a href="/r/${encodeURIComponent(sub.name)}" class="rs-link">r/${sub.name}</a>`;
-        html += `<span class="rs-time">${timeAgo}</span>`;
+        if (showTimestamps) {
+          const timeAgo = formatTimeAgo(sub.visitedAt);
+          html += `<span class="rs-time">${timeAgo}</span>`;
+        }
         html += `<button class="rs-pin-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Pin">\u{1F4CC}</button>`;
         html += `<button class="rs-remove-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Remove from history">\u{1F5D1}</button>`;
         html += `</li>`;
@@ -1357,6 +1408,24 @@
             <div class="rs-hint">Hides each row's \u{1F4CC} and \u{1F5D1}, and the \u2715 in the header,
               until you hover the row they belong to. Keeps the list uncluttered.</div>
           </div>
+          <div class="rs-field">
+            <label class="rs-check">
+              <input type="checkbox" class="rs-checkbox" data-role="show-timestamps"
+                     ${settings.showTimestamps ? "checked" : ""} />
+              <span>Show timestamps</span>
+            </label>
+            <div class="rs-hint">Shows relative timestamps (e.g. "5m ago") next to each
+              subreddit in the Recent and Pinned lists. Uncheck for a cleaner look.</div>
+          </div>
+          <div class="rs-field">
+            <label class="rs-label" for="rs-max-recent">Recent history size</label>
+            <input class="rs-input rs-number-input" id="rs-max-recent" type="number"
+                   data-role="max-recent" min="${MIN_MAX_RECENT}" max="${MAX_MAX_RECENT}"
+                   step="1" value="${settings.maxRecent}" />
+            <div class="rs-hint">How many recently visited subreddits to keep
+              (${MIN_MAX_RECENT}\u2013${MAX_MAX_RECENT}). Pinned subreddits are always kept
+              on top of this, so they never count against the limit.</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1482,6 +1551,25 @@
       saveSettings({ ...loadSettings(), hideRowControls: on });
       ctl2.applyControlVisibility();
       say(on ? "Row controls will show on hover." : "Row controls are always shown.");
+    });
+    panel.querySelector('[data-role="show-timestamps"]').addEventListener("change", (e) => {
+      e.stopPropagation();
+      const on = e.target.checked;
+      saveSettings({ ...loadSettings(), showTimestamps: on });
+      ctl2.refreshList();
+      say(on ? "Timestamps will be shown." : "Timestamps will be hidden.");
+    });
+    const maxRecentInput = panel.querySelector('[data-role="max-recent"]');
+    maxRecentInput.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+    });
+    maxRecentInput.addEventListener("change", () => {
+      const applied = clampMaxRecent(maxRecentInput.value);
+      saveSettings({ ...loadSettings(), maxRecent: applied });
+      maxRecentInput.value = String(applied);
+      saveData(pruneRecent(loadData(), applied));
+      ctl2.refreshList();
+      say(`Keeping up to ${applied} recent subreddit(s).`);
     });
     panel.querySelector('[data-role="reset"]').addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1706,6 +1794,8 @@
   var sidebarEl = null;
   var popupEl = null;
   var settingsOpen = false;
+  var refreshTimer = null;
+  var REFRESH_INTERVAL_MS = 3e4;
   function isSettingsOpen() {
     return settingsOpen;
   }
@@ -1782,7 +1872,7 @@
     return popup;
   }
   function renderContent2(data, instance) {
-    renderContent(data, instance || popupEl, () => !!sidebarEl);
+    renderContent(data, instance || popupEl, () => !!sidebarEl, loadSettings().showTimestamps);
   }
   function harvestIcon() {
     if (!harvestCurrentSubredditIcon(() => !!sidebarEl)) return;
@@ -1800,6 +1890,18 @@
   }
   var activeHotkey = null;
   var lastTrigger = null;
+  function startRefreshTimer() {
+    if (refreshTimer) return;
+    refreshTimer = setInterval(() => {
+      if (isPopupVisible()) refreshList();
+    }, REFRESH_INTERVAL_MS);
+  }
+  function stopRefreshTimer() {
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+  }
   function togglePopup(show, trigger) {
     if (!popupEl) return;
     if (show) {
@@ -1808,8 +1910,10 @@
       popupEl.classList.add("visible");
       if (lastTrigger && document.body.contains(lastTrigger)) positionPopup(popupEl, lastTrigger);
       else positionPopupCentered(popupEl);
+      startRefreshTimer();
     } else {
       popupEl.classList.remove("visible");
+      stopRefreshTimer();
       setSettingsOpen(false);
     }
   }

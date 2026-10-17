@@ -9,14 +9,19 @@ import { escAttr, cachedIcon, fetchSubredditIcon } from './icons.js';
  * Render the recent/pinned list into one instance's content slot.
  * `instance` is the node whose `.rs-content` gets the list.
  * `isMounted()` reports whether the UI is still in the document.
+ * `showTimestamps` controls whether the relative-time column is rendered.
  */
-export function renderContent(data, instance, isMounted) {
+export function renderContent(data, instance, isMounted, showTimestamps = true) {
   if (!instance) return;
 
   const content = instance.querySelector('.rs-content');
   if (!content) return;
 
   const { recent, pinned } = data;
+
+  // Pinned entries are stored as plain names, but the visit timestamp lives in
+  // the recent list. Build a lookup so pinned rows can show it too.
+  const visitedAtByName = new Map(recent.map((s) => [s.name, s.visitedAt]));
 
   let html = '';
 
@@ -29,6 +34,12 @@ export function renderContent(data, instance, isMounted) {
       html += `<li class="rs-item rs-pinned">`;
       html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(name))}" src="${escAttr(icon)}" alt="" />`;
       html += `<a href="/r/${encodeURIComponent(name)}" class="rs-link">r/${name}</a>`;
+      if (showTimestamps) {
+        const visitedAt = visitedAtByName.get(name);
+        if (visitedAt) {
+          html += `<span class="rs-time">${formatTimeAgo(visitedAt)}</span>`;
+        }
+      }
       html += `<button class="rs-reorder-up" data-name="${escAttr(encodeURIComponent(name))}" title="Move up" ${i === 0 ? 'disabled' : ''}>▲</button>`;
       html += `<button class="rs-reorder-down" data-name="${escAttr(encodeURIComponent(name))}" title="Move down" ${i === pinned.length - 1 ? 'disabled' : ''}>▼</button>`;
       html += `<button class="rs-unpin-btn" data-name="${escAttr(encodeURIComponent(name))}" title="Unpin">✕</button>`;
@@ -44,12 +55,14 @@ export function renderContent(data, instance, isMounted) {
     html += '<div class="rs-section-title">🕐 Recent</div>';
     html += '<ul class="rs-list">';
     for (const sub of recentFiltered) {
-      const timeAgo = formatTimeAgo(sub.visitedAt);
       const icon = cachedIcon(sub.name);
       html += `<li class="rs-item">`;
       html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(sub.name))}" src="${escAttr(icon)}" alt="" />`;
       html += `<a href="/r/${encodeURIComponent(sub.name)}" class="rs-link">r/${sub.name}</a>`;
-      html += `<span class="rs-time">${timeAgo}</span>`;
+      if (showTimestamps) {
+        const timeAgo = formatTimeAgo(sub.visitedAt);
+        html += `<span class="rs-time">${timeAgo}</span>`;
+      }
       html += `<button class="rs-pin-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Pin">📌</button>`;
       // The trash removes the entry from history. Recent rows only: the Pinned
       // section already has its own ✕ unpin control.

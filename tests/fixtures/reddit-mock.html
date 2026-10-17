@@ -23,6 +23,9 @@
                                  with a real 403 + HTML body (which is what reddit
                                  does under rate limiting), then succeed
       ?blocked=<name,...>        seed the settings blacklist with these names
+      ?fastIntervals=<n>         divide every setInterval delay by n, so a test can
+                                 observe a real periodic tick (the timestamp-aging
+                                 refresh is 30s) without waiting it out
       ?sub=<name>                the page is a subreddit view: adds reddit's own
                                  `#subreddit-icon-img` + header, holding the icon
                                  the harvest should adopt (no fetch needed)
@@ -108,6 +111,18 @@ window.__store = store;
     window.__xhrTimes = [];
     window.__errors = [];
     window.__warns = [];
+
+    // ?fastIntervals=N divides every setInterval delay by N, so a test can observe
+    // a real periodic tick without waiting out the production interval (the
+    // timestamp-aging refresh is 30s). Only setInterval is touched — the icon
+    // fetch uses setTimeout and must keep its own timing. The callback still runs
+    // on the real clock, so a test asserting that a label aged is asserting real
+    // elapsed time, not simulated time.
+    const fastIntervals = Number(params.get('fastIntervals') || 0);
+    if (fastIntervals > 0) {
+      const realSetInterval = window.setInterval.bind(window);
+      window.setInterval = (fn, ms, ...rest) => realSetInterval(fn, Math.max(1, Math.round(ms / fastIntervals)), ...rest);
+    }
 
     // Capture console.warn so the "no trigger matched" diagnostic is assertable.
     const realWarn = console.warn.bind(console);
