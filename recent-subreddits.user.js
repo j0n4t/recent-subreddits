@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recent Subreddits Sidebar
-// @namespace    https://github.com/your-username/recent-subreddits
-// @version      1.3.1
+// @namespace    https://github.com/j0n4t/recent-subreddits
+// @version      1.4.0
 // @description  Adds a popup menu (triggered by hovering/clicking the Reddit logo) listing recently accessed subreddits with pinning support
 // @match        https://www.reddit.com/*
 // @match        https://old.reddit.com/*
@@ -1640,7 +1640,9 @@
     panel.querySelector('[data-role="export"]').addEventListener("click", (e) => {
       e.stopPropagation();
       const settings2 = loadSettings();
-      const blob = new Blob([JSON.stringify(settings2, null, 2)], { type: "application/json" });
+      const data = loadData();
+      const export_ = { settings: settings2, data };
+      const blob = new Blob([JSON.stringify(export_, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1662,8 +1664,12 @@
         try {
           const imported = JSON.parse(String(reader.result));
           if (!imported || typeof imported !== "object") throw new Error("invalid");
-          const merged = { ...defaultSettings(), ...imported };
+          const settingsObj = imported.settings || imported;
+          const merged = { ...defaultSettings(), ...settingsObj };
           saveSettings(merged);
+          if (imported.data && typeof imported.data === "object") {
+            saveData(imported.data);
+          }
           ctl2.setActiveHotkey(parseHotkey(merged.hotkey));
           ctl2.applyTargets();
           ctl2.applyControlVisibility();

@@ -3230,9 +3230,11 @@ describe('recent-subreddits sidebar', { skip }, () => {
 
     assert.ok(download, 'export should trigger a download');
     const parsed = JSON.parse(download);
-    assert.equal(parsed.hotkey, 'Alt+Shift+R', 'exported hotkey should match');
-    assert.ok(Array.isArray(parsed.targets), 'exported targets should be an array');
-    assert.ok(parsed.targets.length > 0, 'exported targets should not be empty');
+    assert.equal(parsed.settings.hotkey, 'Alt+Shift+R', 'exported hotkey should match');
+    assert.ok(Array.isArray(parsed.settings.targets), 'exported targets should be an array');
+    assert.ok(parsed.settings.targets.length > 0, 'exported targets should not be empty');
+    assert.ok(Array.isArray(parsed.data.recent), 'exported data should include recent list');
+    assert.ok(Array.isArray(parsed.data.pinned), 'exported data should include pinned list');
   });
 
   test('import: applies settings from a JSON file', async () => {

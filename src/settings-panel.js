@@ -397,7 +397,9 @@ export function renderSettingsPanel(instance, ctl, openSection) {
   panel.querySelector('[data-role="export"]').addEventListener('click', (e) => {
     e.stopPropagation();
     const settings = loadSettings();
-    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+    const data = loadData();
+    const export_ = { settings, data };
+    const blob = new Blob([JSON.stringify(export_, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -421,9 +423,13 @@ export function renderSettingsPanel(instance, ctl, openSection) {
       try {
         const imported = JSON.parse(String(reader.result));
         if (!imported || typeof imported !== 'object') throw new Error('invalid');
-        // Merge with defaults so missing fields get sane values.
-        const merged = { ...defaultSettings(), ...imported };
+        // Support both { settings, data } and bare settings format.
+        const settingsObj = imported.settings || imported;
+        const merged = { ...defaultSettings(), ...settingsObj };
         saveSettings(merged);
+        if (imported.data && typeof imported.data === 'object') {
+          saveData(imported.data);
+        }
         ctl.setActiveHotkey(parseHotkey(merged.hotkey));
         ctl.applyTargets();
         ctl.applyControlVisibility();
