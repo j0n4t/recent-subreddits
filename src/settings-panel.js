@@ -5,7 +5,7 @@
 // and a small controller surface are passed in rather than closed over — that
 // keeps this module free of an import cycle with the mount code.
 import { loadSettings, saveSettings, defaultSettings, DEFAULT_SETTINGS, MIN_MAX_RECENT, MAX_MAX_RECENT, clampMaxRecent, pruneRecent, loadData, saveData } from './storage.js';
-import { escAttr } from './icons.js';
+import { escAttr } from './html.js';
 import { parseHotkey, comboFromEvent } from './hotkey.js';
 import { startPicker } from './picker.js';
 

@@ -3,7 +3,8 @@
 // The recent/pinned list as HTML. One function renders into whichever instance
 // is passed — the popup or any inline block — because they share the shell.
 import { formatTimeAgo } from './time.js';
-import { escAttr, cachedIcon, fetchSubredditIcon } from './icons.js';
+import { cachedIcon, fetchSubredditIcon } from './icons.js';
+import { escAttr } from './html.js';
 
 /**
  * Render the recent/pinned list into one instance's content slot.

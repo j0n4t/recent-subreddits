@@ -13,20 +13,7 @@ is fixed.
 
 ---
 
-## 1. `escAttr` lives in `icons.js`
-
-**Why it matters.** It is a generic HTML-escaping helper defined in the icon
-module and imported by `content.js` and `settings-panel.js` for unrelated
-reasons. The module's stated purpose ("subreddit icon cache and fetch") is then
-false, and a reader editing icon logic meets an HTML helper they did not expect.
-
-**Fix.** Move it to a leaf module (`html.js` or `dom.js`).
-
-**Done when.** No module imports an escaping helper from an unrelated feature.
-
----
-
-## 2. The injected stylesheet is never validated
+## 1. The injected stylesheet is never validated
 
 **Why it matters.** `injectStyles()` builds one large CSS string. A typo — a
 missing brace, a misspelled property — fails silently at runtime, and nothing
@@ -40,7 +27,7 @@ after injection. Cheap and it closes a whole failure class.
 
 ---
 
-## 3. Keyboard navigation in the popup
+## 2. Keyboard navigation in the popup
 
 **Why it matters.** The hotkey exists so the popup works regardless of Reddit's
 markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
@@ -51,7 +38,7 @@ existing trash/blocklist logic.
 
 ---
 
-## 4. Import / export settings
+## 3. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey
@@ -62,7 +49,7 @@ configuration is meaningful.
 
 ---
 
-## 5. An inline target that matches nothing is silent
+## 4. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming

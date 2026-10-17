@@ -916,9 +916,6 @@
   var iconQueue = [];
   var iconInFlight = /* @__PURE__ */ new Set();
   var iconPumpRunning = false;
-  function escAttr(s) {
-    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-  }
   function cachedIcon(name) {
     return iconCache[name] || DEFAULT_ICON;
   }
@@ -1103,6 +1100,11 @@
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
+  }
+
+  // src/html.js
+  function escAttr(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   }
 
   // src/content.js

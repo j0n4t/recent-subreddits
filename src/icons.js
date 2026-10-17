@@ -54,14 +54,6 @@ const iconQueue = [];
 const iconInFlight = new Set();
 let iconPumpRunning = false;
 
-/** Escape a value for interpolation into an HTML attribute. */
-export function escAttr(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;');
-}
-
 /** The icon cached for `name`, or the placeholder. Never triggers a fetch. */
 export function cachedIcon(name) {
   return iconCache[name] || DEFAULT_ICON;
