@@ -1,29 +1,51 @@
 // End-to-end regression tests for recent-subreddits.user.js
 //
 // Drives the REAL userscript in a real Chromium against tests/fixtures/reddit-mock.html,
-// which stubs the GM_* APIs. No network, no reddit.com, no bot protection.
+// served by fixture-server.mjs so the page has a real origin (see below). No
+// network, no reddit.com, no bot protection.
 //
 // Run:  npm run test:e2e
 
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
 
 import { Browser, findBrowser, run } from './cdp-harness.mjs';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE = pathToFileURL(join(HERE, '..', 'fixtures', 'reddit-mock.html')).href;
+import { startFixtureServer } from './fixture-server.mjs';
 
 const browserPath = findBrowser();
 const skip = browserPath ? false : 'no Chromium found (set E2E_BROWSER to override)';
 
-/** Build the fixture URL with a seeded GM store. */
-function fixtureUrl(seed, iconDelay = 5, iconFail = null, settings = null) {
+/**
+ * The fixture is SERVED over http, not opened as a `file://` page (tech debt #4).
+ *
+ * A file:// document has a filesystem pathname, so `trackVisit()` never ran and
+ * `history.pushState` threw — which made visit tracking and Reddit's SPA
+ * navigation untestable, the two things most likely to break silently on a
+ * Reddit change. Serving it gives the page a real origin: `location.pathname` is
+ * a real route and pushState works, so both can be driven for real.
+ *
+ * Set in before(); every URL builder reads it through fixtureUrl().
+ */
+let ORIGIN = null;
+
+/** The subreddit route a test wants, e.g. subPath('javascript') -> '/r/javascript/'. */
+function subPath(name) {
+  return `/r/${encodeURIComponent(name)}/`;
+}
+
+/**
+ * Build a fixture URL with a seeded GM store.
+ *
+ * `path` defaults to `/` — a non-subreddit page, the shape most tests want.
+ * Passing a subreddit route is what makes the page a real subreddit view:
+ * `location.pathname` drives tracking, and the fixture renders its own icon
+ * anchor + header for it exactly as reddit does.
+ */
+function fixtureUrl(seed, iconDelay = 5, iconFail = null, settings = null, path = '/') {
   const b64 = Buffer.from(JSON.stringify(seed), 'utf8').toString('base64');
   const fail = iconFail ? `&iconFail=${encodeURIComponent(iconFail)}` : '';
   const settingsQuery = settings ? `&settings=${settingsParam(settings)}` : '';
-  return `${FIXTURE}?seed=${encodeURIComponent(b64)}&iconDelay=${iconDelay}${fail}${settingsQuery}`;
+  return `${ORIGIN}${path}?seed=${encodeURIComponent(b64)}&iconDelay=${iconDelay}${fail}${settingsQuery}`;
 }
 
 /**
@@ -121,14 +143,18 @@ const DEFAULT_SEED = {
 
 describe('recent-subreddits sidebar', { skip }, () => {
   let b;
+  let server;
 
   before(async () => {
+    server = await startFixtureServer();
+    ORIGIN = server.origin;
     b = await Browser.launch();
     assert.ok(b, 'browser failed to launch');
   });
 
   after(async () => {
     if (b) await b.stop();
+    if (server) await server.close();
   });
 
   /** Fresh page per test: no cross-test state, no storage bleed. */
@@ -172,6 +198,203 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await openPopup();
     await openPanel(label);
   }
+
+  /** The names recorded in the visit store, newest first. */
+  const STORED_RECENT = run(() => {
+    const data = JSON.parse(window.__store.recentSubreddits || '{"recent":[],"pinned":[]}');
+    return data.recent.map((r) => r.name);
+  });
+
+  // -------------------------------------------------------------------------
+  // Visit tracking and real SPA navigation.
+  //
+  // These live in e2e (rather than the unit suite) only because they now CAN:
+  // the fixture is served over http, so location.pathname is a real route and
+  // history.pushState works. On the old file:// fixture trackVisit() never ran
+  // and pushState threw, which is what made this code untestable — tech debt #4.
+  // -------------------------------------------------------------------------
+
+  test('tracking: loading a subreddit route records the visit', async () => {
+    await b.goto(fixtureUrl({ recent: [], pinned: [] }, 5, null, null, subPath('javascript')));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+
+    assert.deepEqual(
+      await b.evaluate(STORED_RECENT),
+      ['javascript'],
+      'opening /r/javascript/ must record that visit'
+    );
+
+    // And it is rendered, not just stored.
+    await openPopup();
+    assert.deepEqual(
+      (await b.evaluate(NAMES)).recent,
+      ['javascript'],
+      'the tracked visit must appear in the list'
+    );
+  });
+
+  test('tracking: a non-subreddit route records nothing', async () => {
+    // The home feed is not a subreddit view, so there is nothing to track.
+    await open({ recent: [], pinned: [] });
+    assert.deepEqual(await b.evaluate(STORED_RECENT), [], 'the root route must not be tracked');
+  });
+
+  test('tracking: a real SPA navigation is observed and the new subreddit recorded', async () => {
+    // The behaviour the MutationObserver exists for: reddit changes the URL
+    // without a page load, and the visit must still be recorded. Driven with a
+    // REAL pushState plus a DOM mutation, which is what a reddit navigation
+    // looks like — the observer watches childList+subtree, so a URL change alone
+    // is not enough to be a faithful reproduction.
+    await b.goto(fixtureUrl({ recent: [], pinned: [] }, 5, null, null, subPath('javascript')));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    assert.deepEqual(await b.evaluate(STORED_RECENT), ['javascript'], 'the first route is tracked');
+
+    await b.evaluate(run(() => {
+      history.pushState({}, '', '/r/webdev/');
+      document.body.appendChild(document.createElement('span'));
+      return true;
+    }));
+
+    await b.waitUntil(
+      run(() => {
+        const data = JSON.parse(window.__store.recentSubreddits || '{"recent":[],"pinned":[]}');
+        return data.recent.some((r) => r.name === 'webdev');
+      }),
+      'the SPA navigation to be observed and tracked'
+    );
+
+    assert.deepEqual(
+      await b.evaluate(STORED_RECENT),
+      ['webdev', 'javascript'],
+      'the newest visit goes to the front'
+    );
+  });
+
+  test('tracking: a navigation to a non-subreddit route adds nothing', async () => {
+    await b.goto(fixtureUrl({ recent: [], pinned: [] }, 5, null, null, subPath('javascript')));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+
+    // Home feed, the shape of clicking the reddit logo.
+    await b.evaluate(run(() => {
+      history.pushState({}, '', '/');
+      document.body.appendChild(document.createElement('span'));
+      return true;
+    }));
+    await new Promise((r) => setTimeout(r, 500));
+
+    assert.deepEqual(
+      await b.evaluate(STORED_RECENT),
+      ['javascript'],
+      'navigating to the home feed must not record a visit'
+    );
+  });
+
+  test('tracking: the history cap applies to a tracked visit', async () => {
+    // The write path end to end. It could only be covered by the unit suite
+    // before (tech debt #4); this is the same behaviour through the real script.
+    const seed = {
+      recent: [
+        { name: 'a', visitedAt: Date.now() - 60_000 },
+        { name: 'b', visitedAt: Date.now() - 120_000 },
+      ],
+      pinned: [],
+    };
+    await b.goto(
+      fixtureUrl(seed, 5, null, { maxRecent: 2 }, subPath('fresh'))
+    );
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+
+    assert.deepEqual(
+      await b.evaluate(STORED_RECENT),
+      ['fresh', 'a'],
+      'the new visit goes to the top and the oldest is trimmed'
+    );
+  });
+
+  test('tracking: a blacklisted subreddit is not recorded on load or navigation', async () => {
+    // The end-to-end version of the blacklist rule, which previously had to live
+    // in the unit suite for the same reason.
+    await b.goto(
+      fixtureUrl({ recent: [], pinned: [] }, 5, null, null, subPath('blocked-one')) +
+        '&blocked=blocked-one'
+    );
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    assert.deepEqual(await b.evaluate(STORED_RECENT), [], 'a blocked subreddit must not be tracked');
+
+    // And via a real navigation, too.
+    await b.evaluate(run(() => {
+      history.pushState({}, '', '/r/blocked-one/');
+      document.body.appendChild(document.createElement('span'));
+      return true;
+    }));
+    await new Promise((r) => setTimeout(r, 500));
+    assert.deepEqual(await b.evaluate(STORED_RECENT), [], 'nor when navigated to');
+  });
+
+  test('HARVEST: a real navigation re-harvests the new subreddit icon', async () => {
+    // The harvest's whole recovery story, driven by an actual route change
+    // rather than a ?staleHeader flag. reddit renders the new icon a beat after
+    // the URL changes, so the fixture simulates that by swapping the anchor's
+    // icon and the header name together.
+    await b.goto(fixtureUrl({ recent: [], pinned: [] }, 5, null, null, subPath('javascript')));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+
+    // Navigate for real: new route, and the page's own anchor + header follow it
+    // the way reddit's re-render does.
+    await b.evaluate(run(() => {
+      history.pushState({}, '', '/r/linux/');
+      const hdr = document.querySelector('shreddit-subreddit-header');
+      hdr.setAttribute('name', 'linux');
+      document.querySelector('#subreddit-icon-img img')
+        .setAttribute('src', 'https://styles.redditmedia.com/t5_new/styles/communityIcon_new.png');
+      document.body.appendChild(document.createElement('span'));
+      return true;
+    }));
+
+    await b.waitUntil(
+      run(() => {
+        const img = Array.from(document.querySelectorAll('.rs-icon'))
+          .find((i) => decodeURIComponent(i.dataset.name) === 'linux');
+        return !!img && img.getAttribute('src').includes('communityIcon_new');
+      }),
+      'the navigation to be observed and the new icon harvested'
+    );
+
+    // Filed under the page's own name, and only there.
+    const rows = await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-icon')).map((i) => ({
+      name: decodeURIComponent(i.dataset.name),
+      src: i.getAttribute('src'),
+    }))));
+    const wrong = rows.filter((r) => r.name !== 'linux' && r.src.includes('communityIcon_new'));
+    assert.deepEqual(wrong, [], `the new icon must not land on another row: ${JSON.stringify(wrong)}`);
+  });
+
+  test('the fixture server serves the userscript from any route depth', async () => {
+    // The fixture's <script src> is absolute so it resolves from any depth, and
+    // the server must answer it with real JavaScript — not the fixture HTML. If
+    // this broke, the userscript would never load and every test in this file
+    // would fail with a confusing timeout instead of a clear message.
+    for (const path of ['/', '/r/javascript/', '/r/x/comments/abc/title/']) {
+      const res = await fetch(`${ORIGIN}${path}`);
+      const body = await res.text();
+      assert.equal(res.status, 200, `${path} must be served`);
+      assert.match(res.headers.get('content-type'), /text\/html/, `${path} serves the fixture`);
+      // The fixture's own marker, so this is really the page and not a stray 200.
+      assert.match(body, /Reddit mock/, `${path} must serve the fixture HTML`);
+    }
+
+    const script = await fetch(`${ORIGIN}/recent-subreddits.user.js`);
+    assert.equal(script.status, 200, 'the userscript must be served');
+    assert.match(
+      script.headers.get('content-type'),
+      /javascript/,
+      'and with a JavaScript content type, or the browser refuses to execute it'
+    );
+    const src = await script.text();
+    assert.match(src, /==UserScript==/, 'it must be the built userscript');
+    // The exact mistake this guards: serving the fixture for the script path.
+    assert.doesNotMatch(src, /<html/i, 'the script path must never answer with HTML');
+  });
 
   test('mounts hidden, then shows on hover below the trigger', async () => {
     await open();
@@ -719,7 +942,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // icon is already in the page, so there is nothing to request. The icon URL
     // here is a distinct harvest-only URL, so adopting it can only have come
     // from the DOM.
-    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&sub=javascript`);
+    await b.goto(fixtureUrl(DEFAULT_SEED, 5, null, null, subPath('javascript')));
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
 
     const harvested = await b.evaluate(run(() => {
@@ -750,7 +973,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     // subreddit's icon for ~1s. Here the URL says r/linux while the page's header
     // still names r/javascript — the mid-navigation state. The harvest must
     // refuse, not guess, or r/javascript's icon lands on r/linux's row.
-    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&sub=linux&subStale=javascript`);
+    await b.goto(fixtureUrl(DEFAULT_SEED, 5, null, null, subPath('linux')) + '&staleHeader=javascript');
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
 
     const state = await b.evaluate(run(() => {
@@ -781,7 +1004,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
   test('HARVEST: a foreign URL in the anchor is not adopted', async () => {
     // The anchor is reddit's, but nothing stops a stray <img> from being the
     // first match. Only reddit's image CDN may be adopted.
-    await b.goto(`${fixtureUrl(DEFAULT_SEED)}&sub=javascript`);
+    await b.goto(fixtureUrl(DEFAULT_SEED, 5, null, null, subPath('javascript')));
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
 
     const adopted = await b.evaluate(run(() => {
@@ -1630,11 +1853,8 @@ describe('recent-subreddits sidebar', { skip }, () => {
   test('history size: an over-cap stored list is trimmed on read, not just on write', async () => {
     // A store seeded over the cap (a hand-edit, or a list written before the cap
     // was lowered). The write path is not involved here, so this is what proves
-    // loadData() applies the cap — otherwise the list would paint in full.
-    //
-    // Note: the visit-write path itself cannot be driven here. The fixture is a
-    // file:// page, so location.pathname has no /r/<name>/ and trackVisit() never
-    // runs — tech debt #4. That path is covered by the unit suite instead.
+    // loadData() applies the cap — otherwise the list would paint in full. The
+    // write path itself is covered by the "tracking:" tests above.
     const seed = {
       recent: Array.from({ length: 6 }, (_, i) => ({ name: `sub${i}`, visitedAt: Date.now() - i * 60_000 })),
       pinned: ['sub5'],

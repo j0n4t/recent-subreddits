@@ -26,9 +26,15 @@
       ?fastIntervals=<n>         divide every setInterval delay by n, so a test can
                                  observe a real periodic tick (the timestamp-aging
                                  refresh is 30s) without waiting it out
-      ?sub=<name>                the page is a subreddit view: adds reddit's own
-                                 `#subreddit-icon-img` + header, holding the icon
-                                 the harvest should adopt (no fetch needed)
+      ?staleHeader=<name>        the page is MID-NAVIGATION: the route is already
+                                 the new subreddit while the icon anchor and header
+                                 still name the PREVIOUS one (reddit re-renders them
+                                 ~1s after the URL changes), so the harvest must
+                                 refuse to adopt the icon
+
+    The subreddit the page is showing comes from `location.pathname` — the fixture
+    is served by fixture-server.mjs now, so a real route like /r/javascript/ is
+    what makes this a subreddit view. That is also what makes `trackVisit()` run.
   -->
   <header id="site-header">
     <a href="/" id="logo" data-testid="top-nav-logo"><span id="logo-glyph">R</span></a>
@@ -137,16 +143,18 @@ window.__store = store;
       document.querySelector('#site-header').remove();
     }
 
-    // ?sub=<name> — this page is a subreddit view, so reddit's own icon markup
-    // is present and the userscript should HARVEST it instead of fetching
-    // about.json. The icon URL is deliberately NOT the one the fetch stub
-    // returns, so a test can tell the two sources apart.
-    //
-    // ?subStale=<name> mirrors a view that is MID-NAVIGATION: the icon anchor
+    // The subreddit this page is showing, taken from the REAL route. The fixture
+    // is served over http (fixture-server.mjs), so `/r/<name>/...` is a genuine
+    // pathname — which is what makes the userscript's own getSubredditFromUrl()
+    // and trackVisit() run, exactly as they do on reddit. A `file://` page had a
+    // filesystem pathname and could never exercise them (tech debt #4).
+    const routeMatch = location.pathname.match(/^\/r\/([^/]+)/i);
+    const sub = routeMatch ? decodeURIComponent(routeMatch[1]).toLowerCase() : null;
+
+    // ?staleHeader=<name> mirrors a view that is MID-NAVIGATION: the icon anchor
     // still holds the previous subreddit's icon (reddit re-renders it ~1s after
     // the URL changes), so the harvest must refuse to adopt it.
-    const sub = params.get('sub');
-    const stale = params.get('subStale');
+    const stale = params.get('staleHeader');
     window.__harvestIconUrl = sub ? 'https://styles.redditmedia.com/t5_harvest/styles/communityIcon_harvested.png' : null;
     if (sub) {
       const iconSpan = document.createElement('span');
@@ -157,7 +165,7 @@ window.__store = store;
       const main = document.querySelector('#content');
       main.insertBefore(iconSpan, main.firstChild);
 
-      // The page names the subreddit it is showing. When ?subStale names a
+      // The page names the subreddit it is displaying. When ?staleHeader names a
       // DIFFERENT subreddit, that is the mid-navigation state reddit exhibits
       // (~1s after a subreddit-to-subreddit navigation the anchor still holds the
       // previous subreddit's icon) — and the harvest must file the icon under the
@@ -212,7 +220,12 @@ window.__store = store;
     };
   })();
   </script>
-  <!-- the REAL script under test, not a copy -->
-  <script src="../../recent-subreddits.user.js"></script>
+  <!-- the REAL script under test, not a copy.
+       Absolute path on purpose: the fixture is now served by fixture-server.mjs,
+       and tests load it at real subreddit routes like /r/javascript/ (and
+       potentially deeper, e.g. /r/x/comments/abc/). A relative src would resolve
+       against the current depth and 404 — or worse, be served the fixture HTML
+       and fail as a script parse. The server answers this path from any depth. -->
+  <script src="/recent-subreddits.user.js"></script>
 </body>
 </html>

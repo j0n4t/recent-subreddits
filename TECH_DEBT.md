@@ -69,24 +69,7 @@ appears in `src/`.
 
 ---
 
-## 4. The e2e fixture is a `file://` page, so URL-dependent code is untestable
-
-**Why it matters.** Because the fixture has no `/r/<name>/` path, `trackVisit()`
-never runs in e2e — the "a blacklisted subreddit is never tracked again" test had
-to move to the unit suite, and so did the "a visit trims to the configured cap"
-case. The harvest's SPA staleness window is also simulated with a `?subStale=`
-flag rather than a real navigation. Both are the code most likely to break
-silently on a Reddit change.
-
-**Fix.** Serve the fixture over a tiny static server in `cdp-harness.mjs` so
-`location.pathname` is real.
-
-**Done when.** Tracking and the harvest can be driven through a real navigation
-in e2e.
-
----
-
-## 5. A harvest failure is silent
+## 4. A harvest failure is silent
 
 **Why it matters.** `checkTriggers()` warns when configured hooks match nothing,
 which makes a Reddit markup change visible. The harvest has the same failure
@@ -100,7 +83,7 @@ the exact bug this repo already fixed once — with nothing in the console.
 
 ---
 
-## 6. `escAttr` lives in `icons.js`
+## 5. `escAttr` lives in `icons.js`
 
 **Why it matters.** It is a generic HTML-escaping helper defined in the icon
 module and imported by `content.js` and `settings-panel.js` for unrelated
@@ -113,7 +96,7 @@ false, and a reader editing icon logic meets an HTML helper they did not expect.
 
 ---
 
-## 7. The injected stylesheet is never validated
+## 6. The injected stylesheet is never validated
 
 **Why it matters.** `injectStyles()` builds one large CSS string. A typo — a
 missing brace, a misspelled property — fails silently at runtime, and nothing
@@ -127,7 +110,7 @@ after injection. Cheap and it closes a whole failure class.
 
 ---
 
-## 8. Keyboard navigation in the popup
+## 7. Keyboard navigation in the popup
 
 **Why it matters.** The hotkey exists so the popup works regardless of Reddit's
 markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
@@ -138,7 +121,7 @@ existing trash/blocklist logic.
 
 ---
 
-## 9. Import / export settings
+## 8. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey
@@ -149,7 +132,7 @@ configuration is meaningful.
 
 ---
 
-## 10. An inline target that matches nothing is silent
+## 9. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming

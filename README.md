@@ -81,6 +81,7 @@ in the meantime, so a markup change degrades it rather than removing it.
 | `scripts/build.mjs` | Bundles `src/` into the userscript |
 | `tests/unit/` | Fast unit tests (no browser) |
 | `tests/e2e/` | Browser regression tests over CDP |
+| `tests/e2e/fixture-server.mjs` | Serves the fixture on an ephemeral port, so it has a real origin |
 | `tests/fixtures/reddit-mock.html` | Local Reddit stand-in that stubs the `GM_*` APIs |
 | `README.md` | This file |
 
@@ -165,6 +166,15 @@ The e2e suite loads the built userscript into `tests/fixtures/reddit-mock.html`,
 which mimics the Reddit markup the script anchors to and stubs `GM_getValue`,
 `GM_setValue` and `GM_xmlhttpRequest`. **It never contacts reddit.com**, so bot
 protection and rate limits are not a factor; the icon data comes from the stub.
+
+The fixture is **served** by `tests/e2e/fixture-server.mjs` on an ephemeral port
+rather than opened as a `file://` page. That matters: a `file://` document has a
+filesystem pathname, so `location.pathname` is never `/r/<name>/` and
+`history.pushState` throws. Serving it gives the page a real origin, which is
+what lets the suite drive visit tracking and Reddit's SPA navigation through the
+real userscript. Every path serves the fixture (as Reddit serves its SPA shell
+for every route), so a test can load `/r/javascript/` and get a genuine
+subreddit view.
 
 A Chromium is located automatically (Playwright's cache, then Chrome, then Edge).
 Set `E2E_BROWSER` to point at a specific binary. **If no browser is found the e2e

@@ -233,9 +233,11 @@ describe('icon retry policy', () => {
 });
 
 describe('visit tracking and the blacklist', () => {
-  // These drive the real functions against a stubbed GM store. The e2e suite
-  // cannot cover this: its fixture is a file:// page, so there is no subreddit
-  // URL for the tracker to read, and trackVisit() never runs there.
+  // These drive the real functions against a stubbed GM store. Kept as unit
+  // tests because they assert the STORE contract directly (including the
+  // malformed-store cases) rather than what a user sees; the e2e suite drives
+  // the same behaviour end to end through the served fixture, which is what made
+  // `location.pathname` real enough for trackVisit() to run at all.
 
   const readData = (store) => JSON.parse(store.recentSubreddits || '{"recent":[],"pinned":[]}');
   const readSettings = (store) => JSON.parse(store.recentSubredditsSettings || '{"blocked":[]}');

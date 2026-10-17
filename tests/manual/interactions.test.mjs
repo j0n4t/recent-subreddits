@@ -24,13 +24,13 @@
 
 import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Browser, findBrowser } from '../e2e/cdp-harness.mjs';
+import { startFixtureServer } from '../e2e/fixture-server.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..', '..');
-const FIXTURE = pathToFileURL(join(HERE, '..', 'fixtures', 'reddit-mock.html')).href;
 const SCRIPT = readFileSync(join(ROOT, 'recent-subreddits.user.js'), 'utf8');
 
 // A profile that outlives the run, so Reddit's challenge is cleared once.
@@ -98,6 +98,11 @@ if (!b) {
   console.error('browser failed to launch');
   process.exit(1);
 }
+
+// Offline mode drives the fixture, which is SERVED (fixture-server.mjs) rather
+// than opened as a file:// page: its userscript src is an absolute path, and a
+// real origin is what gives the fixture a real location.pathname.
+const fixtureServer = OFFLINE ? await startFixtureServer() : null;
 // Handy while a run is paused on a question: attach any CDP tool to this port.
 console.log(`CDP port: ${b.cdpPort}  (http://127.0.0.1:${b.cdpPort}/json/list)`);
 
@@ -119,6 +124,7 @@ try {
   console.error(`\n  !! the run threw: ${err.message}`);
   results.push({ label: `run completed (${err.message.slice(0, 60)})`, verdict: 'FAIL' });
 } finally {
+  if (fixtureServer) await fixtureServer.close();
   // Leave the window open: the point is for the human to look at it.
   header('SUMMARY');
   for (const r of results) {
@@ -456,7 +462,7 @@ async function runOffline() {
     }),
     'utf8'
   ).toString('base64');
-  await b.goto(`${FIXTURE}?seed=${encodeURIComponent(seed)}`);
+  await b.goto(`${fixtureServer.origin}/r/javascript/?seed=${encodeURIComponent(seed)}`);
   await b.waitUntil(`!!document.querySelector('#rs-popup')`, 'popup to mount');
   await ask('  The fixture page is loaded. Press Enter to continue. ');
 
