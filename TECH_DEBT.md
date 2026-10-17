@@ -13,21 +13,7 @@ is fixed.
 
 ---
 
-## 1. A harvest failure is silent
-
-**Why it matters.** `checkTriggers()` warns when configured hooks match nothing,
-which makes a Reddit markup change visible. The harvest has the same failure
-shape and no such warning: if `#subreddit-icon-img` is renamed, harvesting stops
-and every icon falls back to the rate-limited fetch. The user sees grey icons —
-the exact bug this repo already fixed once — with nothing in the console.
-
-**Fix.** A `checkHarvest()` warning following the existing pattern.
-
-**Done when.** Breaking the harvest on the fixture produces a console warning.
-
----
-
-## 2. `escAttr` lives in `icons.js`
+## 1. `escAttr` lives in `icons.js`
 
 **Why it matters.** It is a generic HTML-escaping helper defined in the icon
 module and imported by `content.js` and `settings-panel.js` for unrelated
@@ -40,7 +26,7 @@ false, and a reader editing icon logic meets an HTML helper they did not expect.
 
 ---
 
-## 3. The injected stylesheet is never validated
+## 2. The injected stylesheet is never validated
 
 **Why it matters.** `injectStyles()` builds one large CSS string. A typo — a
 missing brace, a misspelled property — fails silently at runtime, and nothing
@@ -54,7 +40,7 @@ after injection. Cheap and it closes a whole failure class.
 
 ---
 
-## 4. Keyboard navigation in the popup
+## 3. Keyboard navigation in the popup
 
 **Why it matters.** The hotkey exists so the popup works regardless of Reddit's
 markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
@@ -65,7 +51,7 @@ existing trash/blocklist logic.
 
 ---
 
-## 5. Import / export settings
+## 4. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey
@@ -76,7 +62,7 @@ configuration is meaningful.
 
 ---
 
-## 6. An inline target that matches nothing is silent
+## 5. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming

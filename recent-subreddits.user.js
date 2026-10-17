@@ -256,6 +256,13 @@
       `none of the configured hooks matched on this page (selectors: ${hookSelectors.join(", ")}). Hovering or clicking will not open the popup. Use the hotkey instead, and check the Page targets in settings \u2014 Reddit may have changed its markup.`
     );
   }
+  function checkHarvest(signals) {
+    if (!signals || !signals.named || signals.hasIcon) return;
+    warnOnce(
+      "harvest",
+      `this page names a subreddit but has no #subreddit-icon-img anchor, so its icon cannot be harvested. Icons will fall back to /r/<name>/about.json, which reddit rate-limits \u2014 expect grey placeholders. Reddit may have changed its markup.`
+    );
+  }
 
   // src/styles.js
   function injectStyles() {
@@ -941,6 +948,9 @@
     delete iconFailures[name];
     saveIcons(iconCache);
     updateIconInDom(name, icon, isMounted);
+  }
+  function harvestSignals() {
+    return { named: !!currentSubredditName(), hasIcon: !!readCurrentSubredditIcon() };
   }
   function harvestCurrentSubredditIcon(isMounted) {
     const icon = readCurrentSubredditIcon();
@@ -1875,8 +1885,9 @@
     renderContent(data, instance || popupEl, () => !!sidebarEl, loadSettings().showTimestamps);
   }
   function harvestIcon() {
-    if (!harvestCurrentSubredditIcon(() => !!sidebarEl)) return;
-    if (sidebarEl) renderContent2(loadData());
+    const adopted = harvestCurrentSubredditIcon(() => !!sidebarEl);
+    if (adopted && sidebarEl) renderContent2(loadData());
+    checkHarvest(harvestSignals());
   }
   function setSettingsOpen(open, instance, openSection) {
     const host = instance || popupEl;

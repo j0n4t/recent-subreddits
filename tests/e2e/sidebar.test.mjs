@@ -3007,6 +3007,91 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
   });
 
+  /** Console warnings containing `needle`. */
+  const warnsMatching = (needle) => run((n) => window.__warns.filter((w) => w.includes(n)), needle);
+
+  test('HARVEST DIAGNOSTIC: a renamed icon anchor produces a console warning', async () => {
+    // The failure this exists for: #subreddit-icon-img is renamed, so harvesting
+    // silently stops and every icon falls back to the rate-limited fetch. The
+    // user sees grey circles and the console says nothing. This is the fixture
+    // with the header present but the anchor gone.
+    await b.goto(`${fixtureUrl(DEFAULT_SEED, 5, null, null, subPath('javascript'))}&noIconAnchor=1`);
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+
+    const warns = await b.waitUntil(
+      run(() => {
+        const w = window.__warns.filter((m) => m.includes('#subreddit-icon-img'));
+        return w.length ? w : null;
+      }),
+      'a warning about the missing icon anchor'
+    );
+    assert.equal(warns.length, 1, `expected exactly one warning, got ${JSON.stringify(warns)}`);
+    assert.match(warns[0], /recent-subreddits/, 'prefixed so it is identifiable');
+    assert.match(warns[0], /grey placeholders/, 'and says what the user will see');
+
+    // It must not repeat on later harvest attempts (the popup-open re-check and
+    // any navigation both call it).
+    await openPopup();
+    await b.evaluate(run(() => {
+      history.pushState({}, '', '/r/webdev/');
+      document.body.appendChild(document.createElement('span'));
+      return true;
+    }));
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(
+      (await b.evaluate(warnsMatching('#subreddit-icon-img'))).length,
+      1,
+      'the warning must not repeat'
+    );
+  });
+
+  test('HARVEST DIAGNOSTIC: no warning when the anchor is present', async () => {
+    // The normal subreddit view: the anchor is there, so nothing is wrong and
+    // the console stays quiet.
+    await b.goto(fixtureUrl(DEFAULT_SEED, 5, null, null, subPath('javascript')));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+    await new Promise((r) => setTimeout(r, 300));
+
+    assert.deepEqual(
+      await b.evaluate(warnsMatching('#subreddit-icon-img')),
+      [],
+      'a healthy subreddit page must not warn about the harvest'
+    );
+  });
+
+  test('HARVEST DIAGNOSTIC: no warning on a page that names no subreddit', async () => {
+    // The false-positive trap this design avoids: the script also matches
+    // old.reddit.com, which has neither the header nor the anchor. A naive
+    // "the harvest got nothing" warning would fire on every such page. Nothing
+    // names a subreddit here, so it stays silent.
+    await b.goto(fixtureUrl(DEFAULT_SEED));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+    await new Promise((r) => setTimeout(r, 300));
+
+    assert.deepEqual(
+      await b.evaluate(warnsMatching('#subreddit-icon-img')),
+      [],
+      'a page with no subreddit header must not warn about the harvest'
+    );
+  });
+
+  test('HARVEST DIAGNOSTIC: no warning mid-navigation, when the anchor is stale', async () => {
+    // The anchor is the PREVIOUS subreddit's, but it is present — the harvest has
+    // something to read, so this is not the failure the diagnostic reports.
+    await b.goto(fixtureUrl(DEFAULT_SEED, 5, null, null, subPath('linux')) + '&staleHeader=javascript');
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+    await openPopup();
+    await new Promise((r) => setTimeout(r, 300));
+
+    assert.deepEqual(
+      await b.evaluate(warnsMatching('#subreddit-icon-img')),
+      [],
+      'a stale-but-present anchor must not warn'
+    );
+  });
+
   test('run() serialises a real function for evaluate', async () => {
     await open();
     // Use run() instead of a template literal — the function body is real code.

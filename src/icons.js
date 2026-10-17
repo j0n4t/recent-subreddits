@@ -137,6 +137,20 @@ function recordIcon(name, icon, isMounted) {
 }
 
 /**
+ * What the page currently offers the harvest, as two independent signals.
+ *
+ * Exposed for the diagnostic rather than the harvest itself. A new-Reddit
+ * subreddit page names itself in a header AND carries an icon anchor; old Reddit
+ * and the home feed carry neither. Keeping the two separate is what lets a caller
+ * tell "this page has no harvestable icon" (normal, and silent) from "this page
+ * should have one and it is gone" (a markup change, worth a warning) — the
+ * distinction a single "did the harvest work" flag would lose.
+ */
+export function harvestSignals() {
+  return { named: !!currentSubredditName(), hasIcon: !!readCurrentSubredditIcon() };
+}
+
+/**
  * Adopt the current subreddit's icon from the page, if it is showing one.
  *
  * Returns true when an icon was adopted. Deliberately conservative — each guard

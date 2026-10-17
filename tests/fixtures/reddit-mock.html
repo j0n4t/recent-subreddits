@@ -31,6 +31,9 @@
                                  still name the PREVIOUS one (reddit re-renders them
                                  ~1s after the URL changes), so the harvest must
                                  refuse to adopt the icon
+      ?noIconAnchor=1            the subreddit header is present but the icon anchor
+                                 is GONE — a renamed #subreddit-icon-img. The harvest
+                                 should warn instead of falling back silently
 
     The subreddit the page is showing comes from `location.pathname` — the fixture
     is served by fixture-server.mjs now, so a real route like /r/javascript/ is
@@ -155,15 +158,21 @@ window.__store = store;
     // still holds the previous subreddit's icon (reddit re-renders it ~1s after
     // the URL changes), so the harvest must refuse to adopt it.
     const stale = params.get('staleHeader');
-    window.__harvestIconUrl = sub ? 'https://styles.redditmedia.com/t5_harvest/styles/communityIcon_harvested.png' : null;
+    // ?noIconAnchor=1 reproduces a RENAMED anchor: the header still names the
+    // subreddit, but #subreddit-icon-img is not there. This is the markup change
+    // the harvest diagnostic exists to make visible.
+    const noIconAnchor = params.get('noIconAnchor');
+    window.__harvestIconUrl = (sub && !noIconAnchor) ? 'https://styles.redditmedia.com/t5_harvest/styles/communityIcon_harvested.png' : null;
     if (sub) {
-      const iconSpan = document.createElement('span');
-      iconSpan.id = 'subreddit-icon-img';
-      const iconImg = document.createElement('img');
-      iconImg.setAttribute('src', window.__harvestIconUrl);
-      iconSpan.appendChild(iconImg);
-      const main = document.querySelector('#content');
-      main.insertBefore(iconSpan, main.firstChild);
+      if (!noIconAnchor) {
+        const iconSpan = document.createElement('span');
+        iconSpan.id = 'subreddit-icon-img';
+        const iconImg = document.createElement('img');
+        iconImg.setAttribute('src', window.__harvestIconUrl);
+        iconSpan.appendChild(iconImg);
+        const main = document.querySelector('#content');
+        main.insertBefore(iconSpan, main.firstChild);
+      }
 
       // The page names the subreddit it is displaying. When ?staleHeader names a
       // DIFFERENT subreddit, that is the mid-navigation state reddit exhibits
@@ -173,6 +182,7 @@ window.__store = store;
       const hdr = document.createElement('shreddit-subreddit-header');
       hdr.setAttribute('name', stale || sub);
       hdr.setAttribute('subreddit-id', 't5_harvest');
+      const main = document.querySelector('#content');
       main.insertBefore(hdr, main.firstChild);
     }
 

@@ -71,8 +71,10 @@ always reachable.
 
 ### When it breaks
 
-The one fragile point is the set of selectors used to find the logo/menu button.
-If Reddit changes its header, hover stops working — and the script says so:
+There are two fragile points, and the script reports both in the console rather
+than failing silently.
+
+**The trigger selectors.** If Reddit changes its header, hover stops working:
 
 ```
 [recent-subreddits] none of the configured hooks matched on this page (selectors: ...).
@@ -82,6 +84,21 @@ Page targets in settings — Reddit may have changed its markup.
 
 That warning names the selectors that failed. The hotkey keeps the feature usable
 in the meantime, so a markup change degrades it rather than removing it.
+
+**The icon harvest.** Subreddit icons come from the page itself, which costs no
+request; the `about.json` fetch is only a fallback, and Reddit rate-limits it. If
+the anchor that holds the icon is renamed, the harvest stops working:
+
+```
+[recent-subreddits] this page names a subreddit but has no #subreddit-icon-img anchor, so
+its icon cannot be harvested. Icons will fall back to /r/<name>/about.json, which reddit
+rate-limits — expect grey placeholders. Reddit may have changed its markup.
+```
+
+Both warnings fire at most once per page. The harvest warning only appears when
+the page *names* a subreddit and has no icon — so old Reddit, the home feed, and
+the moment mid-navigation when the icon is briefly the previous subreddit's all
+stay quiet.
 
 ## Files
 

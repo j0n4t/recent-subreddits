@@ -5,10 +5,10 @@ import {
   loadSettings,
 } from './storage.js';
 
-import { checkTriggers } from './diagnostics.js';
+import { checkTriggers, checkHarvest } from './diagnostics.js';
 import { injectStyles } from './styles.js';
 import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore, removeVisit as removeVisitInStore, movePinned as movePinnedInStore } from './visits.js';
-import { harvestCurrentSubredditIcon } from './icons.js';
+import { harvestCurrentSubredditIcon, harvestSignals } from './icons.js';
 import { positionPopup, positionPopupCentered } from './position.js';
 import { renderContent as renderContentInto } from './content.js';
 import { renderSettingsPanel } from './settings-panel.js';
@@ -165,8 +165,14 @@ function renderContent(data, instance) {
  * there is simply nothing to repaint yet.
  */
 function harvestIcon() {
-  if (!harvestCurrentSubredditIcon(() => !!sidebarEl)) return;
-  if (sidebarEl) renderContent(loadData());
+  const adopted = harvestCurrentSubredditIcon(() => !!sidebarEl);
+  if (adopted && sidebarEl) renderContent(loadData());
+  // Report a harvest that should have worked and did not. This sits at the
+  // harvest attempt rather than at one call site, so all three get it: mount,
+  // popup open, and SPA navigation. The popup-open call doubles as the late
+  // re-check for a header that rendered after mount. warnOnce dedupes, so this
+  // is at most one warning per page.
+  checkHarvest(harvestSignals());
 }
 
 function setSettingsOpen(open, instance, openSection) {

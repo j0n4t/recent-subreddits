@@ -471,43 +471,124 @@ describe('togglePin', () => {
   });
 });
 
-describe('the README quotes the real diagnostic', () => {
+describe('checkHarvest', () => {
+  // The decision is pure (it takes the harvest's two signals), so every case is
+  // unit-testable without a browser. `warnOnce` dedupes per key for the life of
+  // the module, so each case needs a fresh import — done with a cache-busting
+  // query rather than by exporting a reset, which would be test-only API on the
+  // production module.
+  async function freshCheckHarvest() {
+    const mod = await import(`../../src/diagnostics.js?case=${Math.random()}`);
+    return mod.checkHarvest;
+  }
+
+  /** Run checkHarvest(signals) against a fresh module and capture the warns. */
+  async function runWith(signals) {
+    const warns = [];
+    const prevWarn = console.warn;
+    console.warn = (m) => warns.push(String(m));
+    try {
+      const check = await freshCheckHarvest();
+      check(signals);
+      check(signals); // twice: proves the warning does not repeat
+    } finally {
+      console.warn = prevWarn;
+    }
+    return warns;
+  }
+
+  test('warns when the page names a subreddit but has no icon anchor', async () => {
+    // The markup-change signature: the header still says which subreddit this is,
+    // but the anchor the harvest reads is gone.
+    const warns = await runWith({ named: true, hasIcon: false });
+    assert.equal(warns.length, 1, `expected exactly one warning, got ${JSON.stringify(warns)}`);
+    assert.match(warns[0], /\[recent-subreddits\]/);
+    assert.match(warns[0], /no #subreddit-icon-img anchor/);
+    assert.match(warns[0], /grey placeholders/, 'the warning must say what the user will see');
+  });
+
+  test('stays silent on a page that names no subreddit', async () => {
+    // old.reddit.com (which the script also matches), the home feed, and any
+    // non-subreddit route all land here: no header, so nothing to warn about.
+    // Without this, the diagnostic would cry wolf on a supported surface.
+    assert.deepEqual(await runWith({ named: false, hasIcon: false }), []);
+    assert.deepEqual(await runWith({ named: false, hasIcon: true }), []);
+  });
+
+  test('stays silent when the anchor is present', async () => {
+    // The normal case, including mid-navigation: the anchor is STALE but still
+    // there, so the harvest has something to read and the fetch fallback is not
+    // being relied on.
+    assert.deepEqual(await runWith({ named: true, hasIcon: true }), []);
+  });
+
+  test('stays silent when the signals are missing entirely', async () => {
+    // Defensive: a caller passing nothing must not warn.
+    assert.deepEqual(await runWith(undefined), []);
+    assert.deepEqual(await runWith(null), []);
+  });
+});
+
+describe('the README quotes the real diagnostics', () => {
   // The README drifted once already: it quoted `no popup trigger matched on this
   // page` long after the message became `none of the configured hooks matched`
   // (tech debt #3). A user hitting a broken trigger searches the README for that
-  // string and finds nothing. This ties the quoted block to what the code
-  // actually prints, so the two cannot separate again.
+  // string and finds nothing. These tie each quoted block to what the code
+  // actually prints, so the two cannot separate again — and there are two quoted
+  // diagnostics now, so the check is written to cover any number of them.
   const readme = readFileSync(README, 'utf8');
 
-  test('the message README quotes is the message checkTriggers() prints', () => {
+  /**
+   * The fenced block whose first line starts with `[recent-subreddits] <starts>`,
+   * with its prose line wrapping collapsed to match the one-line message.
+   */
+  function quotedBlock(starts) {
+    // \r?\n because the README is checked out with CRLF on Windows.
+    const re = new RegExp('```\\r?\\n(\\[recent-subreddits\\] ' + starts + '[\\s\\S]*?)```');
+    const m = readme.match(re);
+    assert.ok(m, `the README must quote the "${starts}..." diagnostic in a fenced block`);
+    return m[1].replace(/\s+/g, ' ').trim();
+  }
+
+  /** Capture what a check function prints, with console.warn stubbed. */
+  function captureWarn(fn) {
     const warned = [];
     const prevWarn = console.warn;
+    console.warn = (msg) => warned.push(String(msg));
+    try {
+      fn();
+    } finally {
+      console.warn = prevWarn;
+    }
+    return warned;
+  }
+
+  test('the message README quotes is the message checkTriggers() prints', () => {
     const prevDoc = globalThis.document;
     // No element matches, so the warning fires.
     globalThis.document = { querySelectorAll: () => [] };
-    console.warn = (msg) => warned.push(String(msg));
+    let warned;
     try {
-      checkTriggers(['#a', '#b']);
+      warned = captureWarn(() => checkTriggers(['#a', '#b']));
     } finally {
-      console.warn = prevWarn;
       if (prevDoc === undefined) delete globalThis.document;
       else globalThis.document = prevDoc;
     }
 
     assert.equal(warned.length, 1, 'a hook matching nothing must warn once');
-
-    // The README shows `...` where the failing selectors go; compare with the
-    // real selectors normalised to that placeholder.
+    // The README shows `...` where the failing selectors go.
     const printed = warned[0].replace('#a, #b', '...');
+    assert.equal(quotedBlock('none of the'), printed, 'the README quote must match the code');
+  });
 
-    // Pull the fenced block out of the README and collapse its line wrapping:
-    // the quote is wrapped for prose, the message is one line. \r?\n because the
-    // README is checked out with CRLF on Windows.
-    const block = readme.match(/```\r?\n(\[recent-subreddits\] none of the[\s\S]*?)```/);
-    assert.ok(block, 'the README must quote the diagnostic in a fenced block');
-    const quoted = block[1].replace(/\s+/g, ' ').trim();
-
-    assert.equal(quoted, printed, 'the README quote must match what the code prints');
+  test('the message README quotes is the message checkHarvest() prints', () => {
+    // A fresh module, because warnOnce dedupes for the life of the import and the
+    // block above already warned under a different key.
+    return import(`../../src/diagnostics.js?readme=${Math.random()}`).then(({ checkHarvest }) => {
+      const warned = captureWarn(() => checkHarvest({ named: true, hasIcon: false }));
+      assert.equal(warned.length, 1, 'a missing anchor on a named page must warn once');
+      assert.equal(quotedBlock('this page names'), warned[0], 'the README quote must match the code');
+    });
   });
 
   test('the README no longer quotes the superseded message', () => {
