@@ -120,6 +120,7 @@ stay quiet.
 | `tests/e2e/` | Browser regression tests over CDP |
 | `tests/e2e/fixture-server.mjs` | Serves the fixture on an ephemeral port, so it has a real origin |
 | `tests/fixtures/reddit-mock.html` | Local Reddit stand-in that stubs the `GM_*` APIs |
+| `LICENSE` | MIT |
 | `README.md` | This file |
 
 ### Source layout
@@ -167,6 +168,29 @@ npm run check    # lint + typecheck + both suites
 `npm test` rebuilds first via a `pretest` hook, so the committed userscript can
 never drift from `src/`. The build is deterministic — rebuilding an unchanged
 tree produces no diff.
+
+The userscript's `@version` and `package.json`'s `version` are kept in step, and a
+test fails if they drift: `@version` is what Tampermonkey compares to decide
+whether to update, so a stale banner would silently stop updates.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request,
+and is the same gate as `npm run check`:
+
+```bash
+npm ci
+npm run check    # lint + typecheck + unit + e2e
+npm run build && git diff --exit-code   # the committed userscript matches src/
+```
+
+The second step is the artifact-freshness gate: because the userscript is
+committed, a pull request could otherwise merge a build that no longer matches
+`src/`. It passes on a fresh clone, where the build is byte-identical.
+
+The ubuntu runner ships Chrome at `/usr/bin/google-chrome`, which `findBrowser()`
+already probes, so the e2e suite really runs in CI rather than skipping for a
+missing browser.
 
 Known gaps and their reasoning are tracked in [TECH_DEBT.md](TECH_DEBT.md),
 ordered by what to do first.

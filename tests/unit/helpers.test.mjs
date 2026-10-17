@@ -76,6 +76,17 @@ describe('metadata block', () => {
     const meta = source.slice(0, source.indexOf('==/UserScript=='));
     assert.match(meta, /@connect\s+reddit\.com/, 'GM_xmlhttpRequest needs @connect reddit.com');
   });
+
+  test('the userscript @version matches package.json', () => {
+    // They drifted once already (package.json 1.1.0 while the banner said 1.2.0),
+    // because nothing tied them together. @version is what Tampermonkey compares
+    // to decide whether to update, so a stale banner silently stops updates.
+    const pkg = JSON.parse(readFileSync(join(HERE, '..', '..', 'package.json'), 'utf8'));
+    const meta = source.slice(0, source.indexOf('==/UserScript=='));
+    const m = meta.match(/^\/\/\s*@version\s+(\S+)/m);
+    assert.ok(m, 'the built file must declare @version');
+    assert.equal(m[1], pkg.version, 'the banner @version and package.json must not drift apart');
+  });
 });
 
 describe('formatTimeAgo', () => {

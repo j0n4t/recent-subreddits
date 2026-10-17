@@ -4,9 +4,10 @@ Known gaps and the reasoning behind each, ordered by what I would do first. This
 is a working list, not a roadmap: an item is done when it is deleted from here,
 and anything measured says what was measured.
 
-The repo is local-only for now. Anything that only pays off with a remote (CI) is
-listed under "When this goes online" at the end rather than in the priority order
-— until then, `npm run check` before a commit is the gate.
+The repo has a remote now, and CI (`.github/workflows/ci.yml`) runs `npm run
+check` plus the artifact-freshness gate on every push to `main` and every pull
+request, so the gate is enforced rather than remembered. Running `npm run check`
+before a commit still keeps the feedback loop local.
 
 Priorities are **1 = do next**. Each entry says why it matters and how to tell it
 is fixed.
@@ -35,24 +36,6 @@ configuration is meaningful.
 
 ---
 
-## When this goes online
-
-Not worth doing while the repo is local; worth doing the moment it has a remote,
-roughly in this order.
-
-- **CI running `npm run check`.** The suite is the strongest thing here and
-  nothing runs it automatically. `findBrowser()` already skips cleanly with no
-  browser present, and the harness documents the Playwright cache location, so
-  e2e can run in CI rather than being skipped.
-- **The artifact-freshness gate in CI too**, so a pull request cannot merge a
-  stale build. `npm run verify` covers this locally; CI makes it enforceable.
-- **`.gitattributes` matters more** once anyone else clones — the CRLF churn
-  becomes their problem too.
-- **Check a `LICENSE` file exists.** The README says MIT; confirm the file is
-  really there before the repo is public.
-
----
-
 ## Considered and deliberately not done
 
 - **A formatter (prettier).** The codebase is already consistent: 16 of 17
@@ -61,10 +44,11 @@ roughly in this order.
   choice. Adding one now would produce a large reformat diff and fight the HTML
   template literals. Targeted lint rules are the better lever if this changes.
 - **Splitting modules for size.** The largest is `styles.js` at 584 lines, of
-  which 573 are CSS, already sectioned by concern. `app.js` is next at 477 (344
-  code). Nothing here is too big to hold in your head; splitting would add
+  which 573 are the CSS template literal (lines 10–582), already sectioned by
+  concern. `app.js` is next at 483, of which 296 are code (non-blank,
+  non-comment). Nothing here is too big to hold in your head; splitting would add
   indirection for no gain.
-- **Splitting the e2e test file.** It is 3020 lines, but a flat list of 95 tests
+- **Splitting the e2e test file.** It is 3132 lines, but a flat list of 100 tests
   that greps cleanly. Splitting it would scatter the shared fixture and helpers
   for no gain — the run() migration and the openPopup/openSettings helpers were
   the fixes that actually reduced the weight.
@@ -82,6 +66,6 @@ roughly in this order.
   staleness window, which a real navigation now drives). What a probe directory
   would add is re-checkability against live Reddit — but that is exactly the
   flaky, rate-limited surface the measurements describe, so the check would be
-  unreliable precisely when it mattered. Item 1 (a harvest diagnostic) is the
+  unreliable precisely when it mattered. The harvest diagnostic (done) is the
   better answer: it reports the drift at runtime, in the console, instead of
   waiting for someone to remember to run a script.

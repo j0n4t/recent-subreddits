@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A superseded run on the same ref cannot change the answer, so cancel it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # The documented gate: lint + typecheck + unit + e2e. The runner image
+      # ships Chrome at /usr/bin/google-chrome, which findBrowser() probes, so
+      # the e2e suite genuinely runs here rather than skipping for no browser.
+      - run: npm run check
+
+      # Artifact-freshness gate: the userscript is committed, so a pull request
+      # could otherwise merge a build that no longer matches src/.
+      - name: the committed userscript matches src/
+        run: |
+          npm run build
+          git diff --exit-code
