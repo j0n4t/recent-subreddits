@@ -11,6 +11,11 @@ import assert from 'node:assert/strict';
 
 import { Browser, findBrowser, run } from './cdp-harness.mjs';
 import { startFixtureServer } from './fixture-server.mjs';
+// The built-in popup trigger, imported rather than hand-copied: settings seeded
+// in a test must include it (it is a normal settings entry now, not a hardcoded
+// fallback — without it, hover on the fixture's logo opens nothing), and a copy
+// would silently keep asserting the old selector after defaults.js changed.
+import { BUILTIN_HOOK } from '../../src/defaults.js';
 
 const browserPath = findBrowser();
 const skip = browserPath ? false : 'no Chromium found (set E2E_BROWSER to override)';
@@ -47,18 +52,6 @@ function fixtureUrl(seed, iconDelay = 5, iconFail = null, settings = null, path 
   const settingsQuery = settings ? `&settings=${settingsParam(settings)}` : '';
   return `${ORIGIN}${path}?seed=${encodeURIComponent(b64)}&iconDelay=${iconDelay}${fail}${settingsQuery}`;
 }
-
-/**
- * The built-in popup trigger, as it ships in defaults.js. Settings seeded in a
- * test must include it, because it is a normal settings entry now rather than a
- * hardcoded fallback — without it, hover on the fixture's logo opens nothing.
- */
-const BUILTIN_HOOK = {
-  selector: 'a[href="/"], #header-logo, .header-logo, [data-testid="top-nav-logo"], ' +
-    'button[aria-label*="menu" i], #TopNav button, #reddit-logo, #navbar-menu-button',
-  mode: 'hook',
-  events: 'both',
-};
 
 /** A `settings=` query value: base64 of the JSON, matching the fixture's parser. */
 function settingsParam(settings) {
@@ -367,6 +360,25 @@ describe('recent-subreddits sidebar', { skip }, () => {
     }))));
     const wrong = rows.filter((r) => r.name !== 'linux' && r.src.includes('communityIcon_new'));
     assert.deepEqual(wrong, [], `the new icon must not land on another row: ${JSON.stringify(wrong)}`);
+  });
+
+  /**
+   * The fixture is a plain page and cannot import src/defaults.js, so it keeps
+   * one deliberate copy of the built-in trigger. This is what ties it to the
+   * source: without it, editing TRIGGER_SELECTOR leaves the fixture seeding the
+   * OLD selector, and the suite keeps passing against markup that no longer
+   * matches what ships (tech debt #1).
+   */
+  test('the fixture\'s copy of the built-in trigger matches the source', async () => {
+    await b.goto(fixtureUrl({ recent: [], pinned: [] }));
+
+    const fixtureHook = await b.evaluate(run(() => window.__builtinHook));
+
+    assert.deepEqual(
+      fixtureHook,
+      BUILTIN_HOOK,
+      'tests/fixtures/reddit-mock.html hand-copies the built-in hook; it has drifted from src/defaults.js'
+    );
   });
 
   test('the fixture server serves the userscript from any route depth', async () => {
