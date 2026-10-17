@@ -515,6 +515,28 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await openPopup('popup to show after re-mount');
   });
 
+  test('the injected stylesheet is applied: popup is hidden by default and shown with .visible', async () => {
+    await open();
+
+    // A missing brace, a misspelled property, or a wrong value in the CSS
+    // string would be silently swallowed by the browser's CSS parser. Checking
+    // computed styles catches all of those — the two #rs-styles tests above only
+    // check that the <style> element exists, not that the CSS parsed correctly.
+    const result = await b.evaluate(run(() => {
+      const el = document.createElement('div');
+      el.className = 'recent-subreddits-popup';
+      document.body.appendChild(el);
+      const hidden = getComputedStyle(el).display;
+      el.classList.add('visible');
+      const shown = getComputedStyle(el).display;
+      el.remove();
+      return { hidden, shown };
+    }));
+
+    assert.equal(result.hidden, 'none', 'popup must be hidden by default');
+    assert.equal(result.shown, 'block', 'popup must be visible with .visible class');
+  });
+
   test('hover on a child of the trigger also opens it', async () => {
     await open();
     // #logo contains a <span>; closest() must walk up to the anchor.

@@ -13,21 +13,7 @@ is fixed.
 
 ---
 
-## 1. The injected stylesheet is never validated
-
-**Why it matters.** `injectStyles()` builds one large CSS string. A typo — a
-missing brace, a misspelled property — fails silently at runtime, and nothing
-catches it: there is no stylelint, and the two tests touching `#rs-styles` assert
-only that the element exists, not that the CSS parsed.
-
-**Fix.** Assert that `document.styleSheets` contains a rule for a known selector
-after injection. Cheap and it closes a whole failure class.
-
-**Done when.** A deliberately broken CSS rule fails a test.
-
----
-
-## 2. Keyboard navigation in the popup
+## 1. Keyboard navigation in the popup
 
 **Why it matters.** The hotkey exists so the popup works regardless of Reddit's
 markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
@@ -38,7 +24,7 @@ existing trash/blocklist logic.
 
 ---
 
-## 3. Import / export settings
+## 2. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey
@@ -49,7 +35,7 @@ configuration is meaningful.
 
 ---
 
-## 4. An inline target that matches nothing is silent
+## 3. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming
