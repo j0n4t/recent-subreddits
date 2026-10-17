@@ -339,7 +339,41 @@ export class Browser {
       if (last) return last;
       await delay(100);
     }
-    throw new Error(`timed out waiting for ${label} (last value: ${JSON.stringify(last)})`);
+
+    // A missing userscript is the one failure that hides behind a timeout: the
+    // page loads fine, so nothing errors, and every wait then burns its whole
+    // deadline. Naming it here turns ~90 indistinguishable timeouts into one
+    // sentence. See assertUserscriptLoaded() for the up-front check.
+    const hint = await this.userscriptMissingHint();
+    throw new Error(
+      `timed out waiting for ${label} (last value: ${JSON.stringify(last)})` + hint
+    );
+  }
+
+  /**
+   * A sentence naming a missing userscript, or '' when it is loaded.
+   *
+   * The userscript is what mounts #rs-popup, so this is exactly the situation
+   * where a timeout is a fixture problem rather than a test failure. Deliberately
+   * tolerant: any error while probing means "cannot tell", which must not turn a
+   * real timeout into a confusing secondary failure.
+   */
+  async userscriptMissingHint() {
+    try {
+      const ran = await this.evaluate(
+        `typeof window.GM_getValue === 'function' && !!document.querySelector('#rs-popup')`
+      );
+      if (ran) return '';
+      const scripts = await this.evaluate(
+        `Array.from(document.querySelectorAll('script[src]')).map(s => s.src)`
+      );
+      return `\n--- the userscript does not appear to be loaded ---\n` +
+        `no #rs-popup is mounted and its GM_* stubs are absent, so nothing under\n` +
+        `test ever ran. Check that the fixture's <script src> resolves and is\n` +
+        `served as JavaScript. Script URLs the page requested: ${JSON.stringify(scripts)}`;
+    } catch {
+      return '';
+    }
   }
 
   async stop() {

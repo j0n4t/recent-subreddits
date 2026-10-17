@@ -396,6 +396,48 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.doesNotMatch(src, /<html/i, 'the script path must never answer with HTML');
   });
 
+  /**
+   * The precondition every other test rests on: the userscript actually loaded
+   * and mounted. Asserted once, first, so a broken fixture fails with one clear
+   * message instead of ~90 ten-second timeouts (measured: a missing userscript
+   * cost ~16 minutes of pure waiting and a wall of identical "popup to mount"
+   * failures, with nothing naming the cause).
+   */
+  test('SMOKE: the fixture loads the userscript and mounts the popup', async () => {
+    // Deliberately does NOT use open(): that helper waits for the popup, so on a
+    // broken fixture it would time out before these assertions could say why.
+    // This navigates and inspects, so the failure is the assertion, not a wait.
+    await b.goto(fixtureUrl({ recent: [], pinned: [] }));
+
+    const loaded = await b.evaluate(run((popupSel) => ({
+      mounted: !!document.querySelector(popupSel),
+      gmStubs: typeof window.GM_getValue === 'function' && typeof window.GM_setValue === 'function',
+      // What the page actually resolved its <script src> to. A file:// page with
+      // an absolute src resolves this to the filesystem root, which is the
+      // mistake this test exists to catch.
+      scriptSrcs: Array.from(document.querySelectorAll('script[src]')).map((s) => s.src),
+      origin: location.origin,
+    }), POPUP));
+
+    assert.equal(
+      loaded.gmStubs,
+      true,
+      'the fixture must install its GM_* stubs; without them the userscript cannot run'
+    );
+    assert.equal(
+      loaded.mounted,
+      true,
+      `the userscript must mount ${POPUP}. Script URLs requested: ${JSON.stringify(loaded.scriptSrcs)}`
+    );
+    // The page must be served, not a file:// document: tracking and SPA
+    // navigation depend on a real origin (tech debt #4).
+    assert.match(
+      loaded.origin,
+      /^http:\/\//,
+      `the fixture must be served over http, got origin ${loaded.origin}`
+    );
+  });
+
   test('mounts hidden, then shows on hover below the trigger', async () => {
     await open();
     assert.equal(await b.evaluate(isVisible), false, 'popup must start hidden');
