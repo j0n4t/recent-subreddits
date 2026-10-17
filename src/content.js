@@ -30,7 +30,7 @@ export function renderContent(data, instance, isMounted, showTimestamps = true) 
     html += '<div class="rs-section rs-pinned-section">';
     html += '<div class="rs-section-title">📌 Pinned</div>';
     html += '<ul class="rs-list">';
-    pinned.forEach((name, i) => {
+    pinned.forEach((name) => {
       const icon = cachedIcon(name);
       html += `<li class="rs-item rs-pinned">`;
       html += `<span class="rs-drag-handle" data-name="${escAttr(encodeURIComponent(name))}" title="Drag to reorder" draggable="true">⠿</span>`;

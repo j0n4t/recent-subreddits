@@ -465,12 +465,12 @@ describe('movePinned', () => {
 describe('togglePin', () => {
   const readPinned = (store) => JSON.parse(store.recentSubreddits).pinned;
 
-  test('pinning adds to the front', () => {
+  test('pinning adds to the bottom', () => {
     const store = {
       recentSubreddits: JSON.stringify({ recent: [], pinned: ['a'] }),
     };
     withStore(store, () => togglePin('b', () => {}));
-    assert.deepEqual(readPinned(store), ['b', 'a']);
+    assert.deepEqual(readPinned(store), ['a', 'b']);
   });
 
   test('unpinning removes', () => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Recent Subreddits Sidebar
 // @namespace    https://github.com/your-username/recent-subreddits
-// @version      1.3.0
+// @version      1.3.1
 // @description  Adds a popup menu (triggered by hovering/clicking the Reddit logo) listing recently accessed subreddits with pinning support
 // @match        https://www.reddit.com/*
 // @match        https://old.reddit.com/*
