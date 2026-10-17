@@ -537,6 +537,118 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.equal(result.shown, 'block', 'popup must be visible with .visible class');
   });
 
+  test('REGRESSION: the popup border reads against its fill, and the muted text is legible', async () => {
+    // Two measured bugs, both from wiring the light-mode tokens to reddit's
+    // --color-tone-* variables instead of pinning them:
+    //
+    //   1. --rs-border was tone-5 (#F2F2F2), LIGHTER than the tone-4 fill
+    //      (#E4E4E4), so the panel had no edge: 1.27:1 against reddit's page.
+    //   2. --rs-text-muted was tone-3 (#ACACAC), which on that fill gave the
+    //      timestamps and section labels 1.79:1 — unreadable.
+    //
+    // Both are now explicit tokens. The assertion is on the DECLARED token
+    // values (read from the stylesheet text) rather than computed styles,
+    // because the fixture page does not carry reddit's theme-dark class, so a
+    // computed-style check here cannot exercise the dark tokens at all — the
+    // first version of this test did exactly that and failed on its own
+    // fixture. Contrast is then computed from the values themselves.
+    await open();
+
+    const tokens = await b.evaluate(run(() => {
+      const css = document.getElementById('rs-styles').textContent;
+      // Split on the declaration and trim, rather than building a RegExp from a
+      // string: run() serialises this function, so an escaped \\s would need
+      // double-escaping and silently stop matching.
+      const grab = (name) => {
+        const out = [];
+        for (const part of css.split('--' + name + ':')) {
+          // The value runs to the first ';' — every token here is a plain colour.
+          const v = part.split(';')[0].trim();
+          if (v) out.push(v);
+        }
+        // The first split piece is the text BEFORE the first match, so drop it.
+        return out.slice(1);
+      };
+      return {
+        bg: grab('rs-bg'),
+        border: grab('rs-border'),
+        muted: grab('rs-text-muted'),
+      };
+    }));
+
+    // Every token must be a literal colour, not a var() into reddit's palette.
+    for (const [name, values] of Object.entries(tokens)) {
+      assert.ok(values.length >= 2, `--${name} must be declared for both themes (got ${values.length})`);
+      for (const v of values) {
+        assert.doesNotMatch(
+          v,
+          /var\(/,
+          `--${name} must be a pinned colour, not ${v} — reddit's tone variables are ` +
+            `tuned for reddit's surfaces and gave 1.79:1 on this panel`
+        );
+      }
+    }
+
+    const lum = (hex) => {
+      const m = String(hex).trim().match(/^#?([0-9a-f]{6})$/i);
+      if (!m) return null;
+      const n = parseInt(m[1], 16);
+      const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+        v /= 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+    };
+    const ratio = (a, c) => {
+      const la = lum(a), lc = lum(c);
+      if (la === null || lc === null) return null;
+      const hi = Math.max(la, lc), lo = Math.min(la, lc);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+
+    // Pair the light tokens with each other and the dark tokens with each other.
+    const lightBg = tokens.bg[0], darkBg = tokens.bg[1];
+    const lightBorder = tokens.border[0], darkBorder = tokens.border[1];
+    const lightMuted = tokens.muted[0], darkMuted = tokens.muted[1];
+
+    // The border must not be lost inside the fill.
+    //
+    // The bar differs by theme on purpose. In LIGHT mode the border is what
+    // separates a white panel from reddit's white page, so it has to carry real
+    // weight (the bug was 1.27:1 — invisible). In DARK mode the shipped border is
+    // deliberately subtle (#343536 on #1a1a1b, 1.41:1) and reads fine because the
+    // popup fill is itself lighter than the page behind it; the assertion there
+    // only guards against regressing that shipped value.
+    for (const [theme, bg, border, min] of [
+      ['light', lightBg, lightBorder, 3],
+      ['dark', darkBg, darkBorder, 1.4],
+    ]) {
+      const r = ratio(border, bg);
+      assert.ok(
+        r !== null,
+        `(${theme}) could not compute contrast for border ${border} on fill ${bg}`
+      );
+      assert.ok(
+        r >= min,
+        `(${theme}) the border must read against the fill: ${border} on ${bg} is ` +
+          `${r.toFixed(2)}:1, needs ${min}:1`
+      );
+    }
+
+    // The muted text must clear WCAG AA for normal text.
+    for (const [theme, bg, muted] of [
+      ['light', lightBg, lightMuted],
+      ['dark', darkBg, darkMuted],
+    ]) {
+      const r = ratio(muted, bg);
+      assert.ok(
+        r >= 4.5,
+        `(${theme}) muted text must clear 4.5:1: ${muted} on ${bg} is ${r.toFixed(2)}:1 ` +
+          `(the bug was 1.79:1)`
+      );
+    }
+  });
+
   test('hover on a child of the trigger also opens it', async () => {
     await open();
     // #logo contains a <span>; closest() must walk up to the anchor.

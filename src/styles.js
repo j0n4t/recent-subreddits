@@ -10,11 +10,22 @@ export function injectStyles() {
   style.textContent = `
     /* Popup container — hidden by default */
     .recent-subreddits-popup {
-      --rs-bg: var(--color-tone-4, #f6f7f8);
-      --rs-border: var(--color-tone-5, #e4e6e8);
-      --rs-text: var(--color-tone-1, #1c1c1c);
-      --rs-text-muted: var(--color-tone-3, #7c7c7c);
-      --rs-shadow: rgba(0,0,0,0.15);
+      /* Light-mode tokens are EXPLICIT, like the dark ones below — deliberately
+         not reddit's --color-tone-* variables.
+         Measured on a real reddit light page: --rs-text-muted resolved to
+         reddit's tone-3 (#ACACAC), which on this popup's surface gave the
+         timestamps and section labels only 1.79:1 — unreadable. Those variables
+         are tuned for reddit's own surfaces, not for this panel, and they shift
+         when reddit retunes its palette. Pinned values keep both themes
+         self-contained and let the contrast be measured rather than inherited. */
+      --rs-bg: #ffffff;
+      /* 3.4:1 against the white fill: an edge that is actually visible, where
+         tone-4's own value (#E4E4E4) was 1.27:1 and vanished. */
+      --rs-border: #8c8c8c;
+      --rs-text: #1c1c1c;
+      /* 6.7:1 on the white fill (WCAG AA needs 4.5:1 for normal text). */
+      --rs-text-muted: #5c5c5c;
+      --rs-shadow: rgba(0,0,0,0.18);
       --rs-accent: #d93a00;
       --rs-accent-soft: rgba(217,58,0,0.25);
       --rs-ok: #1a7f37;
@@ -112,7 +123,9 @@ export function injectStyles() {
       padding: 2px 4px;
       font-size: 13px;
       line-height: 1;
-      opacity: 0.6;
+      /* 0.75, not 0.6: at 0.6 the gear composited to 4.45:1 against the light
+         fill, just under WCAG AA. Measured; the dark theme was already fine. */
+      opacity: 0.75;
       color: var(--rs-text);
       transition: opacity 0.15s, transform 0.2s;
     }
@@ -472,11 +485,13 @@ export function injectStyles() {
        re-declares them here — otherwise every var() resolves to nothing and
        the text renders on a transparent background. */
     .rs-inline {
-      --rs-bg: var(--color-tone-4, #f6f7f8);
-      --rs-border: var(--color-tone-5, #e4e6e8);
-      --rs-text: var(--color-tone-1, #1c1c1c);
-      --rs-text-muted: var(--color-tone-3, #7c7c7c);
-      --rs-shadow: rgba(0,0,0,0.15);
+      /* Same explicit light-mode tokens as the popup, and for the same measured
+         reason: inheriting reddit's tone variables gave the muted text 1.79:1. */
+      --rs-bg: #ffffff;
+      --rs-border: #8c8c8c;
+      --rs-text: #1c1c1c;
+      --rs-text-muted: #5c5c5c;
+      --rs-shadow: rgba(0,0,0,0.18);
       --rs-accent: #d93a00;
       --rs-accent-soft: rgba(217,58,0,0.25);
       --rs-ok: #1a7f37;

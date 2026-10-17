@@ -376,6 +376,20 @@ export class Browser {
     }
   }
 
+  /**
+   * Capture a PNG of the page, or of one clipped region of it.
+   *
+   * `clip` is in CSS pixels and viewport-relative. It is what makes a FOCUSED
+   * screenshot possible: a full capture of a real site is mostly page, and what
+   * is being documented is one small panel. Returns a Buffer.
+   */
+  async captureScreenshot({ clip = null, format = 'png' } = {}) {
+    const params = { format, captureBeyondViewport: false };
+    if (clip) params.clip = { scale: 1, ...clip };
+    const { data } = await this.session('Page.captureScreenshot', params);
+    return Buffer.from(data, 'base64');
+  }
+
   async stop() {
     try { await this.send('Browser.close'); } catch { /* already gone */ }
     await delay(300);

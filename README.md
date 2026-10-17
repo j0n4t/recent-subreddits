@@ -3,6 +3,14 @@
 A Tampermonkey userscript that lists your recently visited subreddits in a popup
 anchored to Reddit's logo, with the ability to pin favorites for quick access.
 
+| Light | Dark |
+|-------|------|
+| ![The popup, light theme](docs/popup-light.png) | ![The popup, dark theme](docs/popup-dark.png) |
+
+Both shots are the real userscript on a real reddit page, opened by hovering the
+logo. Regenerate them with `npm run screenshot` (see
+[Development](#development)).
+
 ## Features
 
 - Automatically tracks subreddits you visit (15 by default, configurable 1–200)
@@ -116,6 +124,8 @@ stay quiet.
 | `recent-subreddits.user.js` | **Built artifact** — the userscript to install. Generated; do not edit by hand. |
 | `src/` | Source modules (see below) |
 | `scripts/build.mjs` | Bundles `src/` into the userscript |
+| `scripts/screenshot.mjs` | Regenerates the README screenshots from a real reddit page |
+| `docs/` | The README screenshots |
 | `tests/unit/` | Fast unit tests (no browser) |
 | `tests/e2e/` | Browser regression tests over CDP |
 | `tests/e2e/fixture-server.mjs` | Serves the fixture on an ephemeral port, so it has a real origin |
@@ -163,6 +173,7 @@ npm run test:all # both suites
 npm run lint     # eslint
 npm run typecheck # tsc (checkJs, no emit)
 npm run check    # lint + typecheck + both suites
+npm run screenshot # regenerate docs/popup-{light,dark}.png (needs a real reddit session)
 ```
 
 `npm test` rebuilds first via a `pretest` hook, so the committed userscript can
