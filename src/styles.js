@@ -388,6 +388,9 @@ export function injectStyles() {
       font-weight: 500;
     }
     .rs-link:hover { text-decoration: underline; }
+    .rs-item.rs-highlighted {
+      background: var(--rs-accent-soft);
+    }
     .rs-time {
       font-size: 11px;
       color: var(--rs-text-muted);

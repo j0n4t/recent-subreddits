@@ -659,6 +659,9 @@
       font-weight: 500;
     }
     .rs-link:hover { text-decoration: underline; }
+    .rs-item.rs-highlighted {
+      background: var(--rs-accent-soft);
+    }
     .rs-time {
       font-size: 11px;
       color: var(--rs-text-muted);
@@ -2072,6 +2075,50 @@
         }
         togglePopup(false);
         return;
+      }
+      if (isPopupVisible() && !isSettingsOpen()) {
+        const items = Array.from(popupEl.querySelectorAll(".rs-content .rs-item"));
+        if (items.length > 0) {
+          const currentHighlight = items.findIndex((el) => el.classList.contains("rs-highlighted"));
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            const dir = e.key === "ArrowDown" ? 1 : -1;
+            let next;
+            if (currentHighlight === -1) {
+              next = dir === 1 ? 0 : items.length - 1;
+            } else {
+              next = currentHighlight + dir;
+              if (next < 0) next = items.length - 1;
+              if (next >= items.length) next = 0;
+            }
+            items.forEach((el) => el.classList.remove("rs-highlighted"));
+            items[next].classList.add("rs-highlighted");
+            return;
+          }
+          if (currentHighlight !== -1) {
+            const highlighted = items[currentHighlight];
+            const name = highlighted.querySelector(".rs-link").textContent.trim().replace(/^r\//, "");
+            if (e.key === "Enter") {
+              e.preventDefault();
+              window.location.href = `/r/${encodeURIComponent(name)}`;
+              return;
+            }
+            if (e.key === "Insert") {
+              e.preventDefault();
+              togglePin2(name);
+              return;
+            }
+            if (e.key === "Delete") {
+              e.preventDefault();
+              if (highlighted.classList.contains("rs-pinned")) {
+                togglePin2(name);
+              } else {
+                removeVisit2(name);
+              }
+              return;
+            }
+          }
+        }
       }
       if (hotkeyMatches(e, activeHotkey)) {
         e.preventDefault();

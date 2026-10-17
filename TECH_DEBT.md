@@ -14,18 +14,7 @@ is fixed.
 
 ---
 
-## 1. Keyboard navigation in the popup
-
-**Why it matters.** The hotkey exists so the popup works regardless of Reddit's
-markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
-open, Delete to remove the highlighted row would complete the path and reuse the
-existing trash/blocklist logic.
-
-**Done when.** The popup is fully usable without a pointer.
-
----
-
-## 2. Import / export settings
+## 1. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey

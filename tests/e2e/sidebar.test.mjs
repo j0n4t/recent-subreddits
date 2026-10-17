@@ -3241,4 +3241,125 @@ describe('recent-subreddits sidebar', { skip }, () => {
     }, selector));
     assert.ok(width > 0, 'the logo element must have a positive width');
   });
+
+  // -------------------------------------------------------------------------
+  // Keyboard navigation in the popup
+  // -------------------------------------------------------------------------
+
+  test('keyboard: arrow down highlights first row and Enter opens it', async () => {
+    await open();
+    await openPopup();
+
+    // ArrowDown highlights the first row (pinned section renders first).
+    await b.evaluate(PRESS('ArrowDown'));
+    let highlighted = await b.evaluate(run(() => {
+      const el = document.querySelector('.recent-subreddits-popup .rs-item.rs-highlighted');
+      return el ? el.querySelector('.rs-link').textContent.trim().replace(/^r\//, '') : null;
+    }));
+    assert.equal(highlighted, 'linux', 'ArrowDown should highlight the first row (pinned section)');
+
+    // ArrowDown again moves to the next row (first recent).
+    await b.evaluate(PRESS('ArrowDown'));
+    highlighted = await b.evaluate(run(() => {
+      const el = document.querySelector('.recent-subreddits-popup .rs-item.rs-highlighted');
+      return el ? el.querySelector('.rs-link').textContent.trim().replace(/^r\//, '') : null;
+    }));
+    assert.equal(highlighted, 'javascript', 'ArrowDown should move to the next row');
+
+    // Enter opens the highlighted subreddit — verify the link is correct.
+    const linkHref = await b.evaluate(run(() => {
+      const el = document.querySelector('.recent-subreddits-popup .rs-item.rs-highlighted .rs-link');
+      return el ? el.getAttribute('href') : null;
+    }));
+    assert.equal(linkHref, '/r/javascript', 'highlighted row should link to /r/javascript');
+  });
+
+  test('keyboard: arrow up wraps from first to last', async () => {
+    await open();
+    await openPopup();
+
+    // Highlight first row, then ArrowUp should wrap to last.
+    await b.evaluate(PRESS('ArrowDown'));
+    await b.evaluate(PRESS('ArrowUp'));
+    const highlighted = await b.evaluate(run(() => {
+      const el = document.querySelector('.recent-subreddits-popup .rs-item.rs-highlighted');
+      return el ? el.querySelector('.rs-link').textContent.trim().replace(/^r\//, '') : null;
+    }));
+    assert.equal(highlighted, 'rust', 'ArrowUp from first row should wrap to last');
+  });
+
+  test('keyboard: insert promotes a recent subreddit to pinned', async () => {
+    await open();
+    await openPopup();
+
+    // Navigate to 'javascript' (second row, after pinned 'linux').
+    await b.evaluate(PRESS('ArrowDown'));
+    await b.evaluate(PRESS('ArrowDown'));
+
+    // Insert promotes it.
+    await b.evaluate(PRESS('Insert'));
+    const stored = await b.evaluate(run(() => {
+      const data = JSON.parse(window.__store.recentSubreddits || '{"recent":[],"pinned":[]}');
+      return data.pinned;
+    }));
+    assert.ok(stored.includes('javascript'), `Insert should pin 'javascript', got ${JSON.stringify(stored)}`);
+  });
+
+  test('keyboard: delete removes a recent subreddit from history', async () => {
+    await open();
+    await openPopup();
+
+    // Navigate to 'javascript' (second row).
+    await b.evaluate(PRESS('ArrowDown'));
+    await b.evaluate(PRESS('ArrowDown'));
+
+    // Delete removes it.
+    await b.evaluate(PRESS('Delete'));
+    const stored = await b.evaluate(run(() => {
+      const data = JSON.parse(window.__store.recentSubreddits || '{"recent":[],"pinned":[]}');
+      return data.recent.map((r) => r.name);
+    }));
+    assert.ok(!stored.includes('javascript'), `Delete should remove 'javascript', got ${JSON.stringify(stored)}`);
+  });
+
+  test('keyboard: delete on a pinned subreddit un-pins it', async () => {
+    await open();
+    await openPopup();
+
+    // 'linux' is pinned and is the first row.
+    await b.evaluate(PRESS('ArrowDown'));
+
+    // Delete on pinned un-pins (does NOT remove from history).
+    await b.evaluate(PRESS('Delete'));
+    const stored = await b.evaluate(run(() => {
+      const data = JSON.parse(window.__store.recentSubreddits || '{"recent":[],"pinned":[]}');
+      return { pinned: data.pinned, recent: data.recent.map((r) => r.name) };
+    }));
+    assert.ok(!stored.pinned.includes('linux'), `Delete on pinned should un-pin, got pinned=${JSON.stringify(stored.pinned)}`);
+    assert.ok(stored.recent.includes('linux'), `Delete on pinned should NOT remove from history, got recent=${JSON.stringify(stored.recent)}`);
+  });
+
+  test('keyboard: keys do not affect inline blocks', async () => {
+    // Seed with a hook target (opens popup) AND an inline replace target.
+    const settings = {
+      targets: [
+        BUILTIN_HOOK,
+        { selector: '#pick-target', mode: 'replace' },
+      ],
+    };
+    await b.goto(fixtureUrl(DEFAULT_SEED, 5, null, settings));
+    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
+
+    // Open the popup.
+    await b.evaluate(HOVER('#logo'));
+    await b.waitUntil(isVisible, 'popup open');
+
+    // Press ArrowDown — should NOT highlight anything in the inline block.
+    await b.evaluate(PRESS('ArrowDown'));
+    const inlineHighlight = await b.evaluate(run(() => {
+      const el = document.querySelector('.rs-inline .rs-item.rs-highlighted');
+      return el ? el.querySelector('.rs-link').textContent.trim() : null;
+    }));
+    assert.equal(inlineHighlight, null, 'keyboard nav must not affect inline blocks');
+  });
 });

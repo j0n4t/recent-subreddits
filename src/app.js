@@ -411,6 +411,57 @@ function mountSidebar() {
       return;
     }
 
+    // Keyboard navigation: only in the popup, not inline blocks.
+    if (isPopupVisible() && !isSettingsOpen()) {
+      const items = Array.from(popupEl.querySelectorAll('.rs-content .rs-item'));
+      if (items.length > 0) {
+        const currentHighlight = items.findIndex(el => el.classList.contains('rs-highlighted'));
+
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const dir = e.key === 'ArrowDown' ? 1 : -1;
+          let next;
+          if (currentHighlight === -1) {
+            next = dir === 1 ? 0 : items.length - 1;
+          } else {
+            next = currentHighlight + dir;
+            if (next < 0) next = items.length - 1;
+            if (next >= items.length) next = 0;
+          }
+          items.forEach(el => el.classList.remove('rs-highlighted'));
+          items[next].classList.add('rs-highlighted');
+          return;
+        }
+
+        if (currentHighlight !== -1) {
+          const highlighted = items[currentHighlight];
+          const name = highlighted.querySelector('.rs-link').textContent.trim().replace(/^r\//, '');
+
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            window.location.href = `/r/${encodeURIComponent(name)}`;
+            return;
+          }
+
+          if (e.key === 'Insert') {
+            e.preventDefault();
+            togglePin(name);
+            return;
+          }
+
+          if (e.key === 'Delete') {
+            e.preventDefault();
+            if (highlighted.classList.contains('rs-pinned')) {
+              togglePin(name);
+            } else {
+              removeVisit(name);
+            }
+            return;
+          }
+        }
+      }
+    }
+
     if (hotkeyMatches(e, activeHotkey)) {
       e.preventDefault();
       // The escape hatch: works with no trigger on the page at all.
