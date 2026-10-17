@@ -676,21 +676,25 @@
       transition: opacity 0.15s;
     }
     .rs-pin-btn:hover, .rs-unpin-btn:hover { opacity: 1; }
-    .rs-reorder-up, .rs-reorder-down {
-      background: none;
-      border: none;
-      cursor: pointer;
-      padding: 2px;
-      font-size: 10px;
+    .rs-drag-handle {
+      cursor: grab;
+      padding: 2px 4px;
+      font-size: 14px;
       line-height: 1;
       color: var(--rs-text-muted);
       opacity: 0.5;
       transition: opacity 0.15s;
+      user-select: none;
+      flex-shrink: 0;
     }
-    .rs-reorder-up:hover, .rs-reorder-down:hover { opacity: 1; }
-    .rs-reorder-up:disabled, .rs-reorder-down:disabled {
-      opacity: 0.15;
-      cursor: default;
+    .rs-drag-handle:hover { opacity: 1; }
+    .rs-drag-handle:active { cursor: grabbing; }
+    .rs-item.rs-drag-source {
+      opacity: 0.4;
+      border: 1px dashed var(--rs-border);
+    }
+    .rs-item.rs-drop-target {
+      background: var(--rs-accent-soft);
     }
     /* The trash sits next to the pin and matches it, so a row's controls read as
        one group. Recent rows only \u2014 the Pinned section uses the \u2715 above. */
@@ -722,20 +726,17 @@
     .rs-hide-controls .rs-pin-btn,
     .rs-hide-controls .rs-unpin-btn,
     .rs-hide-controls .rs-remove-btn,
-    .rs-hide-controls .rs-reorder-up,
-    .rs-hide-controls .rs-reorder-down {
+    .rs-hide-controls .rs-drag-handle {
       opacity: 0;
     }
     .rs-hide-controls .rs-item:hover .rs-pin-btn,
     .rs-hide-controls .rs-item:hover .rs-unpin-btn,
     .rs-hide-controls .rs-item:hover .rs-remove-btn,
-    .rs-hide-controls .rs-item:hover .rs-reorder-up,
-    .rs-hide-controls .rs-item:hover .rs-reorder-down,
+    .rs-hide-controls .rs-item:hover .rs-drag-handle,
     .rs-hide-controls .rs-pin-btn:focus-visible,
     .rs-hide-controls .rs-unpin-btn:focus-visible,
     .rs-hide-controls .rs-remove-btn:focus-visible,
-    .rs-hide-controls .rs-reorder-up:focus-visible,
-    .rs-hide-controls .rs-reorder-down:focus-visible {
+    .rs-hide-controls .rs-drag-handle:focus-visible {
       opacity: 1;
     }
     /* The main close button follows the same rule, revealed by hovering the
@@ -902,7 +903,7 @@
     if (pinIndex >= 0) {
       data.pinned.splice(pinIndex, 1);
     } else {
-      data.pinned.unshift(name);
+      data.pinned.push(name);
     }
     saveData(data);
     refresh(data);
@@ -914,6 +915,16 @@
     const swap = direction === "up" ? idx - 1 : idx + 1;
     if (swap < 0 || swap >= data.pinned.length) return;
     [data.pinned[idx], data.pinned[swap]] = [data.pinned[swap], data.pinned[idx]];
+    saveData(data);
+    refresh(data);
+  }
+  function movePinnedTo(name, toIndex, refresh) {
+    const data = loadData();
+    const fromIdx = data.pinned.indexOf(name);
+    if (fromIdx === -1) return;
+    if (toIndex < 0 || toIndex >= data.pinned.length) return;
+    if (fromIdx === toIndex) return;
+    data.pinned.splice(toIndex, 0, data.pinned.splice(fromIdx, 1)[0]);
     saveData(data);
     refresh(data);
   }
@@ -1149,6 +1160,7 @@
       pinned.forEach((name, i) => {
         const icon = cachedIcon(name);
         html += `<li class="rs-item rs-pinned">`;
+        html += `<span class="rs-drag-handle" data-name="${escAttr(encodeURIComponent(name))}" title="Drag to reorder" draggable="true">\u283F</span>`;
         html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(name))}" src="${escAttr(icon)}" alt="" />`;
         html += `<a href="/r/${encodeURIComponent(name)}" class="rs-link">r/${name}</a>`;
         if (showTimestamps) {
@@ -1157,8 +1169,6 @@
             html += `<span class="rs-time">${formatTimeAgo(visitedAt)}</span>`;
           }
         }
-        html += `<button class="rs-reorder-up" data-name="${escAttr(encodeURIComponent(name))}" title="Move up" ${i === 0 ? "disabled" : ""}>\u25B2</button>`;
-        html += `<button class="rs-reorder-down" data-name="${escAttr(encodeURIComponent(name))}" title="Move down" ${i === pinned.length - 1 ? "disabled" : ""}>\u25BC</button>`;
         html += `<button class="rs-unpin-btn" data-name="${escAttr(encodeURIComponent(name))}" title="Unpin">\u2715</button>`;
         html += `</li>`;
       });
@@ -1172,13 +1182,13 @@
       for (const sub of recentFiltered) {
         const icon = cachedIcon(sub.name);
         html += `<li class="rs-item">`;
+        html += `<button class="rs-pin-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Pin">\u{1F4CC}</button>`;
         html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(sub.name))}" src="${escAttr(icon)}" alt="" />`;
         html += `<a href="/r/${encodeURIComponent(sub.name)}" class="rs-link">r/${sub.name}</a>`;
         if (showTimestamps) {
           const timeAgo = formatTimeAgo(sub.visitedAt);
           html += `<span class="rs-time">${timeAgo}</span>`;
         }
-        html += `<button class="rs-pin-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Pin">\u{1F4CC}</button>`;
         html += `<button class="rs-remove-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Remove from history">\u{1F5D1}</button>`;
         html += `</li>`;
       }
@@ -1759,10 +1769,10 @@
         ctl.togglePin(pin.dataset.name);
         return;
       }
-      const reorder = e.target.closest(".rs-reorder-up, .rs-reorder-down");
+      const reorder = e.target.closest(".rs-drag-handle");
       if (reorder) {
         e.stopPropagation();
-        ctl.movePinned(reorder.dataset.name, reorder.classList.contains("rs-reorder-up") ? "up" : "down");
+        ctl.movePinned(reorder.dataset.name, e.shiftKey ? "down" : "up");
         return;
       }
       const remove = e.target.closest(".rs-remove-btn");
@@ -1786,6 +1796,44 @@
         ctl.setSettingsOpen(!inst.classList.contains("settings-open"), inst);
       }
       e.stopPropagation();
+    });
+    inst.addEventListener("dragstart", (e) => {
+      const handle = e.target.closest(".rs-drag-handle");
+      if (!handle) return;
+      e.dataTransfer.setData("text/plain", handle.dataset.name);
+      e.dataTransfer.effectAllowed = "move";
+      handle.closest(".rs-item").classList.add("rs-drag-source");
+    });
+    inst.addEventListener("dragover", (e) => {
+      const handle = e.target.closest(".rs-drag-handle");
+      if (!handle) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      handle.closest(".rs-item").classList.add("rs-drop-target");
+    });
+    inst.addEventListener("dragleave", (e) => {
+      const handle = e.target.closest(".rs-drag-handle");
+      if (!handle) return;
+      handle.closest(".rs-item").classList.remove("rs-drop-target");
+    });
+    inst.addEventListener("drop", (e) => {
+      const handle = e.target.closest(".rs-drag-handle");
+      if (!handle) return;
+      e.preventDefault();
+      const fromName = e.dataTransfer.getData("text/plain");
+      const toName = handle.dataset.name;
+      inst.querySelectorAll(".rs-drag-source, .rs-drop-target").forEach((el) => el.classList.remove("rs-drag-source", "rs-drop-target"));
+      if (!fromName || fromName === toName) return;
+      const data = loadData();
+      const fromIdx = data.pinned.indexOf(fromName);
+      const toIdx = data.pinned.indexOf(toName);
+      if (fromIdx === -1 || toIdx === -1) return;
+      movePinnedTo(fromName, toIdx, (d) => {
+        ctl.render(d, inst);
+      });
+    });
+    inst.addEventListener("dragend", () => {
+      inst.querySelectorAll(".rs-drag-source, .rs-drop-target").forEach((el) => el.classList.remove("rs-drag-source", "rs-drop-target"));
     });
   }
   function removeTargetBySelector(selector) {
@@ -2006,10 +2054,9 @@
         togglePin2(pin.dataset.name);
         return;
       }
-      const reorder = e.target.closest(".rs-reorder-up, .rs-reorder-down");
+      const reorder = e.target.closest(".rs-drag-handle");
       if (reorder) {
         e.stopPropagation();
-        movePinned2(reorder.dataset.name, reorder.classList.contains("rs-reorder-up") ? "up" : "down");
         return;
       }
       const remove = e.target.closest(".rs-remove-btn");
@@ -2038,6 +2085,42 @@
         if (!isPopupVisible()) return;
         if (popupEl && !popupEl.matches(":hover")) togglePopup(false);
       }, 300);
+    });
+    sidebarEl.addEventListener("dragstart", (e) => {
+      const handle = e.target.closest(".rs-drag-handle");
+      if (!handle) return;
+      e.dataTransfer.setData("text/plain", handle.dataset.name);
+      e.dataTransfer.effectAllowed = "move";
+      handle.closest(".rs-item").classList.add("rs-drag-source");
+    });
+    sidebarEl.addEventListener("dragover", (e) => {
+      const handle = e.target.closest(".rs-drag-handle");
+      if (!handle) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      handle.closest(".rs-item").classList.add("rs-drop-target");
+    });
+    sidebarEl.addEventListener("dragleave", (e) => {
+      const handle = e.target.closest(".rs-drag-handle");
+      if (!handle) return;
+      handle.closest(".rs-item").classList.remove("rs-drop-target");
+    });
+    sidebarEl.addEventListener("drop", (e) => {
+      const handle = e.target.closest(".rs-drag-handle");
+      if (!handle) return;
+      e.preventDefault();
+      const fromName = e.dataTransfer.getData("text/plain");
+      const toName = handle.dataset.name;
+      sidebarEl.querySelectorAll(".rs-drag-source, .rs-drop-target").forEach((el) => el.classList.remove("rs-drag-source", "rs-drop-target"));
+      if (!fromName || fromName === toName) return;
+      const data = loadData();
+      const fromIdx = data.pinned.indexOf(fromName);
+      const toIdx = data.pinned.indexOf(toName);
+      if (fromIdx === -1 || toIdx === -1) return;
+      movePinnedTo(fromName, toIdx, refreshAll);
+    });
+    sidebarEl.addEventListener("dragend", () => {
+      sidebarEl.querySelectorAll(".rs-drag-source, .rs-drop-target").forEach((el) => el.classList.remove("rs-drag-source", "rs-drop-target"));
     });
     document.addEventListener("mouseover", (e) => {
       const hit = resolveTrigger(e.target);

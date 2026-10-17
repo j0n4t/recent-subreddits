@@ -33,6 +33,7 @@ export function renderContent(data, instance, isMounted, showTimestamps = true) 
     pinned.forEach((name, i) => {
       const icon = cachedIcon(name);
       html += `<li class="rs-item rs-pinned">`;
+      html += `<span class="rs-drag-handle" data-name="${escAttr(encodeURIComponent(name))}" title="Drag to reorder" draggable="true">⠿</span>`;
       html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(name))}" src="${escAttr(icon)}" alt="" />`;
       html += `<a href="/r/${encodeURIComponent(name)}" class="rs-link">r/${name}</a>`;
       if (showTimestamps) {
@@ -41,8 +42,6 @@ export function renderContent(data, instance, isMounted, showTimestamps = true) 
           html += `<span class="rs-time">${formatTimeAgo(visitedAt)}</span>`;
         }
       }
-      html += `<button class="rs-reorder-up" data-name="${escAttr(encodeURIComponent(name))}" title="Move up" ${i === 0 ? 'disabled' : ''}>▲</button>`;
-      html += `<button class="rs-reorder-down" data-name="${escAttr(encodeURIComponent(name))}" title="Move down" ${i === pinned.length - 1 ? 'disabled' : ''}>▼</button>`;
       html += `<button class="rs-unpin-btn" data-name="${escAttr(encodeURIComponent(name))}" title="Unpin">✕</button>`;
       html += `</li>`;
     });
@@ -58,13 +57,13 @@ export function renderContent(data, instance, isMounted, showTimestamps = true) 
     for (const sub of recentFiltered) {
       const icon = cachedIcon(sub.name);
       html += `<li class="rs-item">`;
+      html += `<button class="rs-pin-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Pin">📌</button>`;
       html += `<img class="rs-icon" data-name="${escAttr(encodeURIComponent(sub.name))}" src="${escAttr(icon)}" alt="" />`;
       html += `<a href="/r/${encodeURIComponent(sub.name)}" class="rs-link">r/${sub.name}</a>`;
       if (showTimestamps) {
         const timeAgo = formatTimeAgo(sub.visitedAt);
         html += `<span class="rs-time">${timeAgo}</span>`;
       }
-      html += `<button class="rs-pin-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Pin">📌</button>`;
       // The trash removes the entry from history. Recent rows only: the Pinned
       // section already has its own ✕ unpin control.
       html += `<button class="rs-remove-btn" data-name="${escAttr(encodeURIComponent(sub.name))}" title="Remove from history">🗑</button>`;

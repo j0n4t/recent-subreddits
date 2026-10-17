@@ -7,6 +7,7 @@
 // layout, event handlers and framework references stay intact.
 import { loadData, loadSettings, saveSettings } from './storage.js';
 import { checkInlineTargets } from './diagnostics.js';
+import { movePinnedTo } from './visits.js';
 
 // The shell surface this layer calls back into, installed once by initInline().
 let ctl = null;
@@ -210,10 +211,10 @@ function wireInlineInstance(rec, target) {
       ctl.togglePin(pin.dataset.name);
       return;
     }
-    const reorder = e.target.closest('.rs-reorder-up, .rs-reorder-down');
+    const reorder = e.target.closest('.rs-drag-handle');
     if (reorder) {
       e.stopPropagation();
-      ctl.movePinned(reorder.dataset.name, reorder.classList.contains('rs-reorder-up') ? 'up' : 'down');
+      ctl.movePinned(reorder.dataset.name, e.shiftKey ? 'down' : 'up');
       return;
     }
     const remove = e.target.closest('.rs-remove-btn');
@@ -240,6 +241,50 @@ function wireInlineInstance(rec, target) {
     // Keep clicks inside the block from reaching the document handlers, which
     // would read them as an outside click and close the popup.
     e.stopPropagation();
+  });
+
+  // Drag-to-reorder within the inline block.
+  inst.addEventListener('dragstart', (e) => {
+    const handle = e.target.closest('.rs-drag-handle');
+    if (!handle) return;
+    e.dataTransfer.setData('text/plain', handle.dataset.name);
+    e.dataTransfer.effectAllowed = 'move';
+    handle.closest('.rs-item').classList.add('rs-drag-source');
+  });
+
+  inst.addEventListener('dragover', (e) => {
+    const handle = e.target.closest('.rs-drag-handle');
+    if (!handle) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    handle.closest('.rs-item').classList.add('rs-drop-target');
+  });
+
+  inst.addEventListener('dragleave', (e) => {
+    const handle = e.target.closest('.rs-drag-handle');
+    if (!handle) return;
+    handle.closest('.rs-item').classList.remove('rs-drop-target');
+  });
+
+  inst.addEventListener('drop', (e) => {
+    const handle = e.target.closest('.rs-drag-handle');
+    if (!handle) return;
+    e.preventDefault();
+    const fromName = e.dataTransfer.getData('text/plain');
+    const toName = handle.dataset.name;
+    inst.querySelectorAll('.rs-drag-source, .rs-drop-target').forEach(el => el.classList.remove('rs-drag-source', 'rs-drop-target'));
+    if (!fromName || fromName === toName) return;
+    const data = loadData();
+    const fromIdx = data.pinned.indexOf(fromName);
+    const toIdx = data.pinned.indexOf(toName);
+    if (fromIdx === -1 || toIdx === -1) return;
+    movePinnedTo(fromName, toIdx, (d) => {
+      ctl.render(d, inst);
+    });
+  });
+
+  inst.addEventListener('dragend', () => {
+    inst.querySelectorAll('.rs-drag-source, .rs-drop-target').forEach(el => el.classList.remove('rs-drag-source', 'rs-drop-target'));
   });
 }
 

@@ -50,7 +50,7 @@ export function togglePin(name, refresh) {
   if (pinIndex >= 0) {
     data.pinned.splice(pinIndex, 1);
   } else {
-    data.pinned.unshift(name);
+    data.pinned.push(name);
   }
   saveData(data);
   refresh(data);
@@ -72,8 +72,22 @@ export function movePinned(name, direction, refresh) {
 }
 
 /**
- * Remove a subreddit from history AND blacklist it, then refresh every mounted
- * instance.
+ * Move a pinned subreddit to a specific index, then refresh every mounted
+ * instance. Used by drag-and-drop reordering.
+ */
+ export function movePinnedTo(name, toIndex, refresh) {
+   const data = loadData();
+   const fromIdx = data.pinned.indexOf(name);
+   if (fromIdx === -1) return;
+   if (toIndex < 0 || toIndex >= data.pinned.length) return;
+   if (fromIdx === toIndex) return;
+   data.pinned.splice(toIndex, 0, data.pinned.splice(fromIdx, 1)[0]);
+   saveData(data);
+   refresh(data);
+ }
+
+ /** Remove a subreddit from history AND blacklist it, then refresh every mounted
+  * instance.
  *
  * Both halves matter: dropping the row alone would let the very next visit put it
  * straight back, so the blacklist is what makes the removal stick. Only the

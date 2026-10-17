@@ -7,7 +7,7 @@ import {
 
 import { checkTriggers, checkHarvest } from './diagnostics.js';
 import { injectStyles } from './styles.js';
-import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore, removeVisit as removeVisitInStore, movePinned as movePinnedInStore } from './visits.js';
+import { getSubredditFromUrl, trackVisit, togglePin as togglePinInStore, removeVisit as removeVisitInStore, movePinned as movePinnedInStore, movePinnedTo as movePinnedToInStore } from './visits.js';
 import { harvestCurrentSubredditIcon, harvestSignals } from './icons.js';
 import { positionPopup, positionPopupCentered } from './position.js';
 import { renderContent as renderContentInto } from './content.js';
@@ -323,10 +323,9 @@ function mountSidebar() {
       togglePin(pin.dataset.name);
       return;
     }
-    const reorder = e.target.closest('.rs-reorder-up, .rs-reorder-down');
+    const reorder = e.target.closest('.rs-drag-handle');
     if (reorder) {
       e.stopPropagation();
-      movePinned(reorder.dataset.name, reorder.classList.contains('rs-reorder-up') ? 'up' : 'down');
       return;
     }
     const remove = e.target.closest('.rs-remove-btn');
@@ -360,6 +359,48 @@ function mountSidebar() {
       if (!isPopupVisible()) return;
       if (popupEl && !popupEl.matches(':hover')) togglePopup(false);
     }, 300);
+  });
+
+  // ---- Drag-to-reorder (popup) ----
+  sidebarEl.addEventListener('dragstart', (e) => {
+    const handle = e.target.closest('.rs-drag-handle');
+    if (!handle) return;
+    e.dataTransfer.setData('text/plain', handle.dataset.name);
+    e.dataTransfer.effectAllowed = 'move';
+    handle.closest('.rs-item').classList.add('rs-drag-source');
+  });
+
+  sidebarEl.addEventListener('dragover', (e) => {
+    const handle = e.target.closest('.rs-drag-handle');
+    if (!handle) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    handle.closest('.rs-item').classList.add('rs-drop-target');
+  });
+
+  sidebarEl.addEventListener('dragleave', (e) => {
+    const handle = e.target.closest('.rs-drag-handle');
+    if (!handle) return;
+    handle.closest('.rs-item').classList.remove('rs-drop-target');
+  });
+
+  sidebarEl.addEventListener('drop', (e) => {
+    const handle = e.target.closest('.rs-drag-handle');
+    if (!handle) return;
+    e.preventDefault();
+    const fromName = e.dataTransfer.getData('text/plain');
+    const toName = handle.dataset.name;
+    sidebarEl.querySelectorAll('.rs-drag-source, .rs-drop-target').forEach(el => el.classList.remove('rs-drag-source', 'rs-drop-target'));
+    if (!fromName || fromName === toName) return;
+    const data = loadData();
+    const fromIdx = data.pinned.indexOf(fromName);
+    const toIdx = data.pinned.indexOf(toName);
+    if (fromIdx === -1 || toIdx === -1) return;
+    movePinnedToInStore(fromName, toIdx, refreshAll);
+  });
+
+  sidebarEl.addEventListener('dragend', () => {
+    sidebarEl.querySelectorAll('.rs-drag-source, .rs-drop-target').forEach(el => el.classList.remove('rs-drag-source', 'rs-drop-target'));
   });
 
   // ---- Delegated triggers ----

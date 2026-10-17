@@ -909,7 +909,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.equal(await b.evaluate(isVisible), true, 'popup must stay open after pinning');
     assert.deepEqual(
       await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent))),
-      ['r/javascript', 'r/linux']
+      ['r/linux', 'r/javascript']
     );
 
     await b.evaluate(run(() => document.querySelector('.rs-unpin-btn[data-name="linux"]').click()));
@@ -933,35 +933,27 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.deepEqual(stored.pinned, ['javascript'], 'pin state must be written to GM storage');
   });
 
-  test('reorder: up/down buttons change the pinned order', async () => {
-    // Seed with three pinned subreddits so both directions are testable.
+  test('reorder: drag handle reorders pinned subreddits', async () => {
     const seed = { recent: [], pinned: ['alpha', 'beta', 'gamma'] };
     await b.goto(fixtureUrl(seed));
     await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
     await openPopup();
 
-    // Move alpha down: alpha beta gamma -> beta alpha gamma
-    await b.evaluate(run(() => document.querySelector('.rs-reorder-down[data-name="alpha"]').click()));
-    await b.waitUntil(
-      run(() => {
-        const names = Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent);
-        return names.join(',') === 'r/beta,r/alpha,r/gamma';
-      }),
-      'alpha to move down'
-    );
-    assert.deepEqual(
-      await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent))),
-      ['r/beta', 'r/alpha', 'r/gamma']
-    );
-
-    // Move gamma up: beta alpha gamma -> beta gamma alpha
-    await b.evaluate(run(() => document.querySelector('.rs-reorder-up[data-name="gamma"]').click()));
+    // Drag alpha onto gamma: alpha beta gamma -> beta gamma alpha
+    await b.evaluate(run(() => {
+      const src = document.querySelector('.rs-drag-handle[data-name="alpha"]');
+      const dst = document.querySelector('.rs-drag-handle[data-name="gamma"]');
+      const dt = new DataTransfer();
+      src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+      dst.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt }));
+      dst.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt }));
+    }));
     await b.waitUntil(
       run(() => {
         const names = Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent);
         return names.join(',') === 'r/beta,r/gamma,r/alpha';
       }),
-      'gamma to move up'
+      'alpha to move to gamma\'s position'
     );
 
     // Persisted, not just rendered.
@@ -969,41 +961,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     assert.deepEqual(stored.pinned, ['beta', 'gamma', 'alpha'], 'reorder must be written to GM storage');
   });
 
-  test('reorder: first item has up disabled, last item has down disabled', async () => {
-    const seed = { recent: [], pinned: ['alpha', 'beta', 'gamma'] };
-    await b.goto(fixtureUrl(seed));
-    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
-    await openPopup();
-
-    const disabled = await b.evaluate(run(() => ({
-      firstUp: document.querySelector('.rs-reorder-up[data-name="alpha"]').disabled,
-      lastDown: document.querySelector('.rs-reorder-down[data-name="gamma"]').disabled,
-      middleUp: document.querySelector('.rs-reorder-up[data-name="beta"]').disabled,
-      middleDown: document.querySelector('.rs-reorder-down[data-name="beta"]').disabled,
-    })));
-    assert.equal(disabled.firstUp, true, 'first item must have up disabled');
-    assert.equal(disabled.lastDown, true, 'last item must have down disabled');
-    assert.equal(disabled.middleUp, false, 'middle item must have up enabled');
-    assert.equal(disabled.middleDown, false, 'middle item must have down enabled');
-  });
-
-  test('reorder: clicking a disabled button does not change the order', async () => {
-    const seed = { recent: [], pinned: ['alpha', 'beta'] };
-    await b.goto(fixtureUrl(seed));
-    await b.waitUntil(run((popupSel) => !!document.querySelector(popupSel), POPUP), 'popup to mount');
-    await openPopup();
-
-    // Click the disabled up on the first item — should be a no-op.
-    await b.evaluate(run(() => document.querySelector('.rs-reorder-up[data-name="alpha"]').click()));
-    await new Promise((r) => setTimeout(r, 200));
-    assert.deepEqual(
-      await b.evaluate(run(() => Array.from(document.querySelectorAll('.rs-pinned .rs-link')).map(a => a.textContent))),
-      ['r/alpha', 'r/beta'],
-      'order must not change when clicking a disabled button'
-    );
-  });
-
-  test('reorder: works from an inline block too', async () => {
+  test('reorder: drag works from an inline block too', async () => {
     const settings = {
       hotkey: 'Alt+Shift+R',
       targets: [{ selector: '#pick-target', mode: 'replace', events: 'both' }],
@@ -1013,14 +971,21 @@ describe('recent-subreddits sidebar', { skip }, () => {
     await b.goto(fixtureUrl(seed, 5, null, settings));
     await b.waitUntil(run(() => !!document.querySelector('.rs-inline .rs-pinned')), 'inline block to mount');
 
-    // Move alpha down in the inline block.
-    await b.evaluate(run(() => document.querySelector('.rs-inline .rs-reorder-down[data-name="alpha"]').click()));
+    // Drag alpha onto gamma in the inline block.
+    await b.evaluate(run(() => {
+      const src = document.querySelector('.rs-inline .rs-drag-handle[data-name="alpha"]');
+      const dst = document.querySelector('.rs-inline .rs-drag-handle[data-name="gamma"]');
+      const dt = new DataTransfer();
+      src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+      dst.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt }));
+      dst.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt }));
+    }));
     await b.waitUntil(
       run(() => {
         const names = Array.from(document.querySelectorAll('.rs-inline .rs-pinned .rs-link')).map(a => a.textContent);
-        return names.join(',') === 'r/beta,r/alpha,r/gamma';
+        return names.join(',') === 'r/beta,r/gamma,r/alpha';
       }),
-      'alpha to move down in inline block'
+      'alpha to move to gamma\'s position in inline block'
     );
   });
 
@@ -2921,7 +2886,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
 
     const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubreddits)));
-    assert.deepEqual(stored.pinned, ['javascript', 'linux'], 'the pin must be persisted');
+    assert.deepEqual(stored.pinned, ['linux', 'javascript'], 'the pin must be persisted (newest at bottom)');
   });
 
   test('inline block: settings open from its own gear and swap in place', async () => {

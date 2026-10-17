@@ -209,6 +209,18 @@ async function shoot(b, theme, icons) {
   await waitFor(b, `!!document.querySelector('#rs-popup')?.classList.contains('visible')`,
     `the popup to open from hovering ${logo.sel}`);
 
+  // Hover the popup header so the logo's native tooltip is dismissed.
+  const header = await b.evaluate(`(() => {
+    const el = document.querySelector('#rs-popup .rs-header-row');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  })()`);
+  if (header) {
+    await b.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: header.x, y: header.y, button: 'none' }, b.sessionId);
+    await delay(300);
+  }
+
   // One popup, or the capture would frame the wrong element.
   const count = await b.evaluate(`document.querySelectorAll('#rs-popup').length`);
   if (count !== 1) {

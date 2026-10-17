@@ -405,21 +405,25 @@ export function injectStyles() {
       transition: opacity 0.15s;
     }
     .rs-pin-btn:hover, .rs-unpin-btn:hover { opacity: 1; }
-    .rs-reorder-up, .rs-reorder-down {
-      background: none;
-      border: none;
-      cursor: pointer;
-      padding: 2px;
-      font-size: 10px;
+    .rs-drag-handle {
+      cursor: grab;
+      padding: 2px 4px;
+      font-size: 14px;
       line-height: 1;
       color: var(--rs-text-muted);
       opacity: 0.5;
       transition: opacity 0.15s;
+      user-select: none;
+      flex-shrink: 0;
     }
-    .rs-reorder-up:hover, .rs-reorder-down:hover { opacity: 1; }
-    .rs-reorder-up:disabled, .rs-reorder-down:disabled {
-      opacity: 0.15;
-      cursor: default;
+    .rs-drag-handle:hover { opacity: 1; }
+    .rs-drag-handle:active { cursor: grabbing; }
+    .rs-item.rs-drag-source {
+      opacity: 0.4;
+      border: 1px dashed var(--rs-border);
+    }
+    .rs-item.rs-drop-target {
+      background: var(--rs-accent-soft);
     }
     /* The trash sits next to the pin and matches it, so a row's controls read as
        one group. Recent rows only — the Pinned section uses the ✕ above. */
@@ -451,20 +455,17 @@ export function injectStyles() {
     .rs-hide-controls .rs-pin-btn,
     .rs-hide-controls .rs-unpin-btn,
     .rs-hide-controls .rs-remove-btn,
-    .rs-hide-controls .rs-reorder-up,
-    .rs-hide-controls .rs-reorder-down {
+    .rs-hide-controls .rs-drag-handle {
       opacity: 0;
     }
     .rs-hide-controls .rs-item:hover .rs-pin-btn,
     .rs-hide-controls .rs-item:hover .rs-unpin-btn,
     .rs-hide-controls .rs-item:hover .rs-remove-btn,
-    .rs-hide-controls .rs-item:hover .rs-reorder-up,
-    .rs-hide-controls .rs-item:hover .rs-reorder-down,
+    .rs-hide-controls .rs-item:hover .rs-drag-handle,
     .rs-hide-controls .rs-pin-btn:focus-visible,
     .rs-hide-controls .rs-unpin-btn:focus-visible,
     .rs-hide-controls .rs-remove-btn:focus-visible,
-    .rs-hide-controls .rs-reorder-up:focus-visible,
-    .rs-hide-controls .rs-reorder-down:focus-visible {
+    .rs-hide-controls .rs-drag-handle:focus-visible {
       opacity: 1;
     }
     /* The main close button follows the same rule, revealed by hovering the

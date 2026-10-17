@@ -1,6 +1,6 @@
 {
   "name": "recent-subreddits",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "description": "Userscript: recently visited subreddits in a popup anchored to the Reddit logo and more",
   "type": "module",
