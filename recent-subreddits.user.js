@@ -1481,6 +1481,9 @@
 
     <div class="rs-status"></div>
     <div class="rs-actions">
+      <button class="rs-btn" data-role="export">Export</button>
+      <button class="rs-btn" data-role="import-btn">Import</button>
+      <input type="file" data-role="import" accept="application/json" style="display:none" />
       <button class="rs-btn" data-role="reset">Reset to default</button>
       <button class="rs-btn rs-btn-primary" data-role="done">Done</button>
     </div>
@@ -1632,6 +1635,45 @@
     panel.querySelector('[data-role="done"]').addEventListener("click", (e) => {
       e.stopPropagation();
       ctl2.setSettingsOpen(false, host);
+    });
+    panel.querySelector('[data-role="export"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      const settings2 = loadSettings();
+      const blob = new Blob([JSON.stringify(settings2, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "recent-subreddits-settings.json";
+      a.click();
+      URL.revokeObjectURL(url);
+      say("Settings exported.");
+    });
+    panel.querySelector('[data-role="import-btn"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      panel.querySelector('[data-role="import"]').click();
+    });
+    panel.querySelector('[data-role="import"]').addEventListener("change", (e) => {
+      e.stopPropagation();
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const imported = JSON.parse(String(reader.result));
+          if (!imported || typeof imported !== "object") throw new Error("invalid");
+          const merged = { ...defaultSettings(), ...imported };
+          saveSettings(merged);
+          ctl2.setActiveHotkey(parseHotkey(merged.hotkey));
+          ctl2.applyTargets();
+          ctl2.applyControlVisibility();
+          ctl2.rerender(host);
+          say("Settings imported.");
+        } catch {
+          say("Import failed \u2014 invalid JSON.", "error");
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = "";
     });
   }
 

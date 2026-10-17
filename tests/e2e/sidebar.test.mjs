@@ -3208,6 +3208,72 @@ describe('recent-subreddits sidebar', { skip }, () => {
   });
 
   // -------------------------------------------------------------------------
+  // Import / export settings
+  // -------------------------------------------------------------------------
+
+  test('export: downloads settings as JSON', async () => {
+    await open();
+    await openSettings();
+
+    // Intercept the download by capturing the blob content.
+    const download = await b.evaluate(run(() => {
+      const origCreate = URL.createObjectURL;
+      let captured = null;
+      URL.createObjectURL = (blob) => {
+        captured = blob;
+        return origCreate.call(URL, blob);
+      };
+      document.querySelector('[data-role="export"]').click();
+      URL.createObjectURL = origCreate;
+      return captured ? captured.text() : null;
+    }));
+
+    assert.ok(download, 'export should trigger a download');
+    const parsed = JSON.parse(download);
+    assert.equal(parsed.hotkey, 'Alt+Shift+R', 'exported hotkey should match');
+    assert.ok(Array.isArray(parsed.targets), 'exported targets should be an array');
+    assert.ok(parsed.targets.length > 0, 'exported targets should not be empty');
+  });
+
+  test('import: applies settings from a JSON file', async () => {
+    await open();
+    await openSettings();
+
+    // Create a File and set it on the hidden import input.
+    await b.evaluate(run(() => {
+      const settings = {
+        hotkey: 'Ctrl+Shift+X',
+        targets: [{ selector: '#custom-trigger', mode: 'hook', events: 'both' }],
+        blocked: ['testblock'],
+        hideRowControls: true,
+        showTimestamps: false,
+        maxRecent: 5,
+      };
+      const file = new File([JSON.stringify(settings)], 'settings.json', { type: 'application/json' });
+      const input = document.querySelector('[data-role="import"]');
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }));
+
+    await b.waitUntil(
+      run(() => {
+        const s = JSON.parse(window.__store.recentSubredditsSettings);
+        return s.hotkey === 'Ctrl+Shift+X';
+      }),
+      'imported settings to be saved'
+    );
+
+    const stored = JSON.parse(await b.evaluate(run(() => window.__store.recentSubredditsSettings)));
+    assert.equal(stored.hotkey, 'Ctrl+Shift+X', 'hotkey should be imported');
+    assert.deepEqual(stored.blocked, ['testblock'], 'blocklist should be imported');
+    assert.equal(stored.hideRowControls, true, 'hideRowControls should be imported');
+    assert.equal(stored.showTimestamps, false, 'showTimestamps should be imported');
+    assert.equal(stored.maxRecent, 5, 'maxRecent should be imported');
+  });
+
+  // -------------------------------------------------------------------------
   // Keyboard navigation in the popup
   // -------------------------------------------------------------------------
 
