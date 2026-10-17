@@ -13,63 +13,7 @@ is fixed.
 
 ---
 
-## 1. The built-in selector is duplicated across four files
-
-**Why it matters.** `TRIGGER_SELECTOR` is hand-copied into
-`tests/e2e/sidebar.test.mjs`, `tests/fixtures/reddit-mock.html` and
-`tests/unit/helpers.test.mjs`. A change to the real selector silently leaves the
-tests asserting the old one — the tests keep passing while testing nothing real.
-
-**Fix.** The tests are ESM, so they can import `BUILTIN_HOOK` from
-`src/defaults.js` directly. The fixture cannot (it is a plain page), so keep one
-copy there plus a test asserting the fixture's copy equals the source.
-
-**Done when.** `grep -r navbar-menu-button` finds one definition plus one
-deliberate fixture copy, with a test tying them together.
-
----
-
-## 2. The measurements this design rests on are not preserved
-
-**Why it matters.** Several decisions depend on facts measured against the live
-site, and those facts are not written down anywhere durable:
-
-- Reddit answers `/r/<name>/about.json` with a 403 plus an HTML body, per
-  subreddit and time-varying (measured: two of twelve subreddits 403'd on every
-  attempt while their neighbours succeeded).
-- `#subreddit-icon-img` holds the current subreddit's icon, and is present
-  immediately on load.
-- After a subreddit-to-subreddit navigation that anchor keeps the *previous*
-  subreddit's icon for roughly a second.
-- `shreddit-subreddit-header[name]` names the subreddit the page is displaying.
-
-The probes that produced these were throwaway scripts. If Reddit changes, the
-claims cannot be re-verified without rewriting them.
-
-**Fix.** Promote the handful of probes that produced load-bearing numbers into
-`scripts/probes/`, each with the finding in a comment at the top.
-
-**Done when.** The claims above can be re-checked by running one command.
-
----
-
-## 3. README has drifted from the code
-
-**Why it matters.** Two concrete regressions:
-
-- README quotes the diagnostic as `no popup trigger matched on this page`; the
-  message is now `none of the configured hooks matched on this page`, because the
-  built-in trigger became an editable settings entry.
-- The trash button, the blocklist, and its settings textarea are undocumented.
-
-**Fix.** Update both, and consider a test asserting the string the README quotes
-appears in `src/`.
-
-**Done when.** Every user-visible behaviour is described, and quoted strings match.
-
----
-
-## 4. A harvest failure is silent
+## 1. A harvest failure is silent
 
 **Why it matters.** `checkTriggers()` warns when configured hooks match nothing,
 which makes a Reddit markup change visible. The harvest has the same failure
@@ -83,7 +27,7 @@ the exact bug this repo already fixed once — with nothing in the console.
 
 ---
 
-## 5. `escAttr` lives in `icons.js`
+## 2. `escAttr` lives in `icons.js`
 
 **Why it matters.** It is a generic HTML-escaping helper defined in the icon
 module and imported by `content.js` and `settings-panel.js` for unrelated
@@ -96,7 +40,7 @@ false, and a reader editing icon logic meets an HTML helper they did not expect.
 
 ---
 
-## 6. The injected stylesheet is never validated
+## 3. The injected stylesheet is never validated
 
 **Why it matters.** `injectStyles()` builds one large CSS string. A typo — a
 missing brace, a misspelled property — fails silently at runtime, and nothing
@@ -110,7 +54,7 @@ after injection. Cheap and it closes a whole failure class.
 
 ---
 
-## 7. Keyboard navigation in the popup
+## 4. Keyboard navigation in the popup
 
 **Why it matters.** The hotkey exists so the popup works regardless of Reddit's
 markup; once it is open, the list is mouse-only. Arrow keys to move, Enter to
@@ -121,7 +65,7 @@ existing trash/blocklist logic.
 
 ---
 
-## 8. Import / export settings
+## 5. Import / export settings
 
 **Why it matters.** Settings are now a real user-authored model — hotkey, page
 targets with selectors and modes, and a blocklist. Losing them to a Tampermonkey
@@ -132,7 +76,7 @@ configuration is meaningful.
 
 ---
 
-## 9. An inline target that matches nothing is silent
+## 6. An inline target that matches nothing is silent
 
 **Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
 deliberately and with a test asserting the silence. A one-line diagnostic naming
@@ -162,16 +106,16 @@ roughly in this order.
 
 ## Considered and deliberately not done
 
-- **A formatter (prettier).** The codebase is already consistent: 13 of 15
-  modules are single-quote dominant, and the two that are not are the two that
-  build HTML strings, where double quotes inside the string are the natural
+- **A formatter (prettier).** The codebase is already consistent: 16 of 17
+  modules are single-quote dominant, and the one that is not is `content.js`,
+  which builds HTML strings where double quotes inside the string are the natural
   choice. Adding one now would produce a large reformat diff and fight the HTML
   template literals. Targeted lint rules are the better lever if this changes.
-- **Splitting modules for size.** The largest is `styles.js` at 472 lines, of
-  which 435 are CSS, already sectioned by concern. `app.js` is next at 396 (253
+- **Splitting modules for size.** The largest is `styles.js` at 584 lines, of
+  which 573 are CSS, already sectioned by concern. `app.js` is next at 477 (344
   code). Nothing here is too big to hold in your head; splitting would add
   indirection for no gain.
-- **Splitting the e2e test file.** It is 1898 lines, but a flat list of 62 tests
+- **Splitting the e2e test file.** It is 3020 lines, but a flat list of 95 tests
   that greps cleanly. Splitting it would scatter the shared fixture and helpers
   for no gain — the run() migration and the openPopup/openSettings helpers were
   the fixes that actually reduced the weight.
@@ -181,3 +125,14 @@ roughly in this order.
   measured either way yet.
 - **Multiple settings profiles.** The target model would support it, but nothing
   suggests the complexity is wanted.
+- **Promoting the live-site probes into `scripts/probes/`.** The measurements
+  this design rests on are recorded where they are used: the 403 behaviour and
+  the `#subreddit-icon-img` harvest both have their numbers in the `src/icons.js`
+  header, next to the decisions they justify, and the decisions themselves are
+  pinned by fixture tests (the 403 retry, the harvest, and the mid-navigation
+  staleness window, which a real navigation now drives). What a probe directory
+  would add is re-checkability against live Reddit — but that is exactly the
+  flaky, rate-limited surface the measurements describe, so the check would be
+  unreliable precisely when it mattered. Item 1 (a harvest diagnostic) is the
+  better answer: it reports the drift at runtime, in the console, instead of
+  waiting for someone to remember to run a script.

@@ -19,9 +19,11 @@ import { getSubredditFromUrl } from '../../src/visits.js';
 import { ICON_MAX_ATTEMPTS, ICON_RETRY_DELAYS } from '../../src/icons.js';
 import { trackVisit, removeVisit, movePinned, togglePin } from '../../src/visits.js';
 import { loadSettings, defaultSettings, DEFAULT_SETTINGS, pruneRecent, MIN_MAX_RECENT, MAX_MAX_RECENT } from '../../src/storage.js';
+import { checkTriggers } from '../../src/diagnostics.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUILT = join(HERE, '..', '..', 'recent-subreddits.user.js');
+const README = join(HERE, '..', '..', 'README.md');
 
 /**
  * Install a GM store, run `fn`, then restore the globals.
@@ -466,6 +468,56 @@ describe('togglePin', () => {
     };
     withStore(store, () => togglePin('a', () => {}));
     assert.deepEqual(readPinned(store), ['b']);
+  });
+});
+
+describe('the README quotes the real diagnostic', () => {
+  // The README drifted once already: it quoted `no popup trigger matched on this
+  // page` long after the message became `none of the configured hooks matched`
+  // (tech debt #3). A user hitting a broken trigger searches the README for that
+  // string and finds nothing. This ties the quoted block to what the code
+  // actually prints, so the two cannot separate again.
+  const readme = readFileSync(README, 'utf8');
+
+  test('the message README quotes is the message checkTriggers() prints', () => {
+    const warned = [];
+    const prevWarn = console.warn;
+    const prevDoc = globalThis.document;
+    // No element matches, so the warning fires.
+    globalThis.document = { querySelectorAll: () => [] };
+    console.warn = (msg) => warned.push(String(msg));
+    try {
+      checkTriggers(['#a', '#b']);
+    } finally {
+      console.warn = prevWarn;
+      if (prevDoc === undefined) delete globalThis.document;
+      else globalThis.document = prevDoc;
+    }
+
+    assert.equal(warned.length, 1, 'a hook matching nothing must warn once');
+
+    // The README shows `...` where the failing selectors go; compare with the
+    // real selectors normalised to that placeholder.
+    const printed = warned[0].replace('#a, #b', '...');
+
+    // Pull the fenced block out of the README and collapse its line wrapping:
+    // the quote is wrapped for prose, the message is one line. \r?\n because the
+    // README is checked out with CRLF on Windows.
+    const block = readme.match(/```\r?\n(\[recent-subreddits\] none of the[\s\S]*?)```/);
+    assert.ok(block, 'the README must quote the diagnostic in a fenced block');
+    const quoted = block[1].replace(/\s+/g, ' ').trim();
+
+    assert.equal(quoted, printed, 'the README quote must match what the code prints');
+  });
+
+  test('the README no longer quotes the superseded message', () => {
+    // The specific regression: the old wording, which no longer exists anywhere
+    // in src/.
+    assert.doesNotMatch(
+      readme,
+      /no popup trigger matched on this page/,
+      'the README still quotes the pre-settings-panel wording'
+    );
   });
 });
 

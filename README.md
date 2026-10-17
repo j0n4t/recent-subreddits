@@ -18,6 +18,11 @@ anchored to Reddit's logo, with the ability to pin favorites for quick access.
   is visible instead of silent
 - Works on both new Reddit (www) and old Reddit
 - Handles Reddit's single-page navigation — no page reload needed
+- **Element picker**: hook any element on any site to open the popup, or render
+  the list inline (replacing, prepending to, or appending to it) — not just the
+  Reddit logo
+- **Blocklist**: removed subreddits stay removed instead of reappearing on the
+  next visit
 - Data persists across sessions via Tampermonkey storage
 
 ## Installation
@@ -35,12 +40,18 @@ anchored to Reddit's logo, with the ability to pin favorites for quick access.
 - **Recent section**: subreddits you've visited, most recent first
 - **Pin button** (📌): Click to pin a subreddit — it moves to the Pinned section
 - **Unpin button** (✕): Click to unpin — it returns to the Recent section
+- **Trash button** (🗑): Click to remove a subreddit from history. It also adds the
+  subreddit to the blocklist, so visiting it again will not put it back. There is
+  no confirmation — un-block it in settings to let it return.
 - Click any subreddit name to navigate to it
 - Dismiss with the close button, a click outside, or `Escape`
 - **⚙ Settings**: click the gear in the popup header to change the hotkey
 - **Hotkey**: press `Alt+Shift+R` (or your configured combination) to open the
   popup from anywhere. It does not depend on any Reddit markup, so it still works
   when the hover trigger does not.
+- **Blocked subreddits**: a settings section listing the blocklisted names, one per
+  line, without the `r/`. The 🗑 button adds names here; deleting a line lets that
+  subreddit be tracked again. The section is hidden until opened.
 - **Hide row controls until hover**: a settings option that keeps each row's 📌 and
   🗑, and the header's ✕, invisible until you hover the row they belong to. Off by
   default.
@@ -64,9 +75,9 @@ The one fragile point is the set of selectors used to find the logo/menu button.
 If Reddit changes its header, hover stops working — and the script says so:
 
 ```
-[recent-subreddits] no popup trigger matched on this page (selectors: ...).
-Hovering the logo will not open the popup. Use the hotkey instead, and report
-this so the selectors can be updated.
+[recent-subreddits] none of the configured hooks matched on this page (selectors: ...).
+Hovering or clicking will not open the popup. Use the hotkey instead, and check the
+Page targets in settings — Reddit may have changed its markup.
 ```
 
 That warning names the selectors that failed. The hotkey keeps the feature usable
