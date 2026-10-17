@@ -35,16 +35,6 @@ configuration is meaningful.
 
 ---
 
-## 3. An inline target that matches nothing is silent
-
-**Why it matters.** `applyTargets()` mounts nothing for an unmatched selector,
-deliberately and with a test asserting the silence. A one-line diagnostic naming
-the target would save the user guessing why their block never appeared.
-
-**Done when.** A configured target matching nothing is reported once per page.
-
----
-
 ## When this goes online
 
 Not worth doing while the repo is local; worth doing the moment it has a remote,

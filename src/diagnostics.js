@@ -48,6 +48,27 @@ export function checkTriggers(hookSelectors = []) {
 }
 
 /**
+ * Warn when a configured inline target matches nothing on this page.
+ *
+ * `applyTargets()` mounts nothing for an unmatched selector, deliberately and
+ * with a test asserting the silence. But a one-line diagnostic naming the
+ * target saves the user guessing why their block never appeared.
+ *
+ * Silent when every target matches, or when no inline targets are configured.
+ */
+export function checkInlineTargets(selectors = []) {
+  if (!selectors.length) return;
+  const unmatched = selectors.filter((s) => countMatches(s) === 0);
+  if (!unmatched.length) return;
+  warnOnce(
+    'inline-targets',
+    `inline target(s) matched nothing on this page ` +
+    `(selectors: ${unmatched.join(', ')}). The block will not appear. ` +
+    `Check the Page targets in settings — Reddit may have changed its markup.`
+  );
+}
+
+/**
  * Warn when the page should offer a harvestable icon and does not.
  *
  * The harvest is the cheap primary source: reddit renders the current

@@ -95,7 +95,16 @@ its icon cannot be harvested. Icons will fall back to /r/<name>/about.json, whic
 rate-limits — expect grey placeholders. Reddit may have changed its markup.
 ```
 
-Both warnings fire at most once per page. The harvest warning only appears when
+**The inline targets.** If a configured Page target selector matches nothing,
+the block silently does not appear:
+
+```
+[recent-subreddits] inline target(s) matched nothing on this page (selectors: ...).
+The block will not appear. Check the Page targets in settings — Reddit may have
+changed its markup.
+```
+
+All three warnings fire at most once per page. The harvest warning only appears when
 the page *names* a subreddit and has no icon — so old Reddit, the home feed, and
 the moment mid-navigation when the icon is briefly the previous subreddit's all
 stay quiet.
@@ -133,7 +142,7 @@ but it is written as modules and bundled:
 | `src/icons.js` | Subreddit icon cache and fetch |
 | `src/position.js` | Popup placement geometry |
 | `src/hotkey.js` | Hotkey parse / match / capture |
-| `src/diagnostics.js` | The "no trigger matched" warning |
+| `src/diagnostics.js` | Console diagnostics for unmatched selectors and harvest failures |
 | `src/styles.js` | The stylesheet |
 | `src/time.js` | Relative timestamps |
 

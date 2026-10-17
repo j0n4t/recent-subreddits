@@ -2892,7 +2892,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     );
   });
 
-  test('a target whose element is absent on this page mounts nothing, silently', async () => {
+  test('a target whose element is absent on this page mounts nothing but warns', async () => {
     await b.goto(
       fixtureUrl(DEFAULT_SEED) +
         '&settings=' +
@@ -2907,6 +2907,11 @@ describe('recent-subreddits sidebar', { skip }, () => {
       'nothing should mount for an unmatched selector'
     );
     assert.deepEqual(await b.evaluate(run(() => window.__errors)), [], 'a missing element must not throw');
+
+    const warns = await b.evaluate(run(() => window.__warns));
+    assert.equal(warns.length, 1, `expected exactly one warning, got ${JSON.stringify(warns)}`);
+    assert.match(warns[0], /inline target.*matched nothing/i);
+    assert.match(warns[0], /#does-not-exist/, 'the warning must name the failing selector');
   });
 
   test('an invalid stored selector does not break the other targets', async () => {

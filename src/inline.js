@@ -6,6 +6,7 @@
 // element is hidden with visibility (not display/remove) so the host's own
 // layout, event handlers and framework references stay intact.
 import { loadData, loadSettings, saveSettings } from './storage.js';
+import { checkInlineTargets } from './diagnostics.js';
 
 // The shell surface this layer calls back into, installed once by initInline().
 let ctl = null;
@@ -259,6 +260,7 @@ function removeTargetBySelector(selector) {
 export function applyTargets() {
   if (!document.body) return;
   const wanted = loadSettings().targets.filter((t) => INLINE_MODES.includes(t.mode));
+  checkInlineTargets(wanted.map((t) => t.selector));
 
   // Tear down instances whose target is gone or whose mode left the inline set.
   for (const [selector, rec] of Array.from(inlineInstances.entries())) {

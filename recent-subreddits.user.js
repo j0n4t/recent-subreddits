@@ -256,6 +256,15 @@
       `none of the configured hooks matched on this page (selectors: ${hookSelectors.join(", ")}). Hovering or clicking will not open the popup. Use the hotkey instead, and check the Page targets in settings \u2014 Reddit may have changed its markup.`
     );
   }
+  function checkInlineTargets(selectors = []) {
+    if (!selectors.length) return;
+    const unmatched = selectors.filter((s) => countMatches(s) === 0);
+    if (!unmatched.length) return;
+    warnOnce(
+      "inline-targets",
+      `inline target(s) matched nothing on this page (selectors: ${unmatched.join(", ")}). The block will not appear. Check the Page targets in settings \u2014 Reddit may have changed its markup.`
+    );
+  }
   function checkHarvest(signals) {
     if (!signals || !signals.named || signals.hasIcon) return;
     warnOnce(
@@ -1772,6 +1781,7 @@
   function applyTargets() {
     if (!document.body) return;
     const wanted = loadSettings().targets.filter((t) => INLINE_MODES.includes(t.mode));
+    checkInlineTargets(wanted.map((t) => t.selector));
     for (const [selector, rec] of Array.from(inlineInstances.entries())) {
       const stillWanted = wanted.some((t) => t.selector === selector);
       if (!stillWanted) {

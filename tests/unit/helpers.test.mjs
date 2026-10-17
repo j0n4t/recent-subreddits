@@ -529,6 +529,64 @@ describe('checkHarvest', () => {
   });
 });
 
+describe('checkInlineTargets', () => {
+  async function freshCheckInlineTargets() {
+    const mod = await import(`../../src/diagnostics.js?case=${Math.random()}`);
+    return mod.checkInlineTargets;
+  }
+
+  async function runWith(selectors) {
+    const warns = [];
+    const prevWarn = console.warn;
+    console.warn = (m) => warns.push(String(m));
+    try {
+      const check = await freshCheckInlineTargets();
+      check(selectors);
+      check(selectors); // twice: proves the warning does not repeat
+    } finally {
+      console.warn = prevWarn;
+    }
+    return warns;
+  }
+
+  test('warns when an inline target matches nothing', async () => {
+    const prevDoc = globalThis.document;
+    globalThis.document = { querySelectorAll: () => [] };
+    let warned;
+    try {
+      warned = await runWith(['#a', '#b']);
+    } finally {
+      if (prevDoc === undefined) delete globalThis.document;
+      else globalThis.document = prevDoc;
+    }
+    assert.equal(warned.length, 1, `expected exactly one warning, got ${JSON.stringify(warned)}`);
+    assert.match(warned[0], /\[recent-subreddits\]/);
+    assert.match(warned[0], /inline target.*matched nothing/i);
+    assert.match(warned[0], /#a, #b/, 'the warning must name the failing selectors');
+  });
+
+  test('stays silent when every target matches', async () => {
+    const prevDoc = globalThis.document;
+    globalThis.document = { querySelectorAll: () => [{}] };
+    let warned;
+    try {
+      warned = await runWith(['#a', '#b']);
+    } finally {
+      if (prevDoc === undefined) delete globalThis.document;
+      else globalThis.document = prevDoc;
+    }
+    assert.deepEqual(warned, []);
+  });
+
+  test('stays silent when no inline targets are configured', async () => {
+    assert.deepEqual(await runWith([]), []);
+  });
+
+  test('stays silent when selectors is undefined', async () => {
+    assert.deepEqual(await runWith(undefined), []);
+  });
+});
+
 describe('the README quotes the real diagnostics', () => {
   // The README drifted once already: it quoted `no popup trigger matched on this
   // page` long after the message became `none of the configured hooks matched`
@@ -589,6 +647,23 @@ describe('the README quotes the real diagnostics', () => {
       assert.equal(warned.length, 1, 'a missing anchor on a named page must warn once');
       assert.equal(quotedBlock('this page names'), warned[0], 'the README quote must match the code');
     });
+  });
+
+  test('the message README quotes is the message checkInlineTargets() prints', () => {
+    const prevDoc = globalThis.document;
+    globalThis.document = { querySelectorAll: () => [] };
+    let warned;
+    try {
+      return import(`../../src/diagnostics.js?readme-inline=${Math.random()}`).then(({ checkInlineTargets }) => {
+        warned = captureWarn(() => checkInlineTargets(['#a', '#b']));
+        assert.equal(warned.length, 1, 'an unmatched inline target must warn once');
+        const printed = warned[0].replace('#a, #b', '...');
+        assert.equal(quotedBlock('inline target'), printed, 'the README quote must match the code');
+      });
+    } finally {
+      if (prevDoc === undefined) delete globalThis.document;
+      else globalThis.document = prevDoc;
+    }
   });
 
   test('the README no longer quotes the superseded message', () => {
