@@ -319,6 +319,7 @@ export function injectStyles() {
     .rs-icon-btn:hover { color: var(--rs-error); }
     .rs-actions {
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
       gap: 8px;
       /* Pinned to the bottom of the popup's scrollport. The panel is ~590px of
