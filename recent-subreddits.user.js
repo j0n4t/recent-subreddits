@@ -278,7 +278,8 @@
     if (document.getElementById("rs-styles")) return;
     const style = document.createElement("style");
     style.id = "rs-styles";
-    style.textContent = `
+    style.textContent = /*css*/
+    `
     /* Popup container \u2014 hidden by default */
     .recent-subreddits-popup {
       /* Light-mode tokens are EXPLICIT, like the dark ones below \u2014 deliberately
@@ -304,7 +305,7 @@
 
       display: none;
       position: fixed;
-      width: 280px;
+      min-width: 300px;
       /* Total width, so it matches POPUP_WIDTH in position.js \u2014 the clamp on the
          right edge is computed from that constant. */
       box-sizing: border-box;

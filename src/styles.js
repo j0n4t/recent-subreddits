@@ -7,7 +7,7 @@ export function injectStyles() {
   if (document.getElementById('rs-styles')) return;
   const style = document.createElement('style');
   style.id = 'rs-styles';
-  style.textContent = `
+  style.textContent = /*css*/ `
     /* Popup container — hidden by default */
     .recent-subreddits-popup {
       /* Light-mode tokens are EXPLICIT, like the dark ones below — deliberately
@@ -33,7 +33,7 @@ export function injectStyles() {
 
       display: none;
       position: fixed;
-      width: 280px;
+      min-width: 300px;
       /* Total width, so it matches POPUP_WIDTH in position.js — the clamp on the
          right edge is computed from that constant. */
       box-sizing: border-box;
