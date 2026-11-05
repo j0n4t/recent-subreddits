@@ -15,7 +15,7 @@
 // default content-box the rendered popup was 30px wider than this constant, so
 // the right-edge clamp was off by the same amount.
 
-const POPUP_WIDTH = 280;
+const POPUP_WIDTH = 300;
 const GAP = 8;
 const MARGIN = 16;
 // Below this the popup is not worth showing; better to overflow a sliver than to

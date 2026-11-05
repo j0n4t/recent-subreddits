@@ -418,10 +418,10 @@ function mountSidebar() {
   document.addEventListener('click', (e) => {
     const hit = resolveTrigger(e.target);
     if (hit && wantsClick(hit.events)) {
+      e.preventDefault();
       if (isPopupVisible()) {
         togglePopup(false);
       } else {
-        e.preventDefault();
         togglePopup(true, hit.el);
       }
       return;

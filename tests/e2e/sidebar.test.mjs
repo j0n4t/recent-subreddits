@@ -1190,7 +1190,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
     }
   });
 
-  test('the logo link still navigates (preventDefault only while opening)', async () => {
+  test('clicking the logo hook prevents its default link action', async () => {
     await open();
 
     // First click opens the popup and must swallow the navigation.
@@ -1201,13 +1201,13 @@ describe('recent-subreddits sidebar', { skip }, () => {
     }));
     assert.deepEqual(first, { prevented: true, open: true }, 'opening click should preventDefault');
 
-    // Second click closes it and must let the link through.
+    // Second click closes it but must still swallow the link action.
     const second = await b.evaluate(run(() => {
       const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
       document.querySelector('#logo').dispatchEvent(ev);
       return { prevented: ev.defaultPrevented, open: !!document.querySelector('.recent-subreddits-popup')?.classList.contains('visible') };
     }));
-    assert.deepEqual(second, { prevented: false, open: false }, 'closing click must not preventDefault');
+    assert.deepEqual(second, { prevented: true, open: false }, 'closing click should also preventDefault');
   });
 
   // ---- Viewport fitting: the popup must never be cut off ----
@@ -1239,7 +1239,9 @@ describe('recent-subreddits sidebar', { skip }, () => {
     return {
       top: Math.round(r.top),
       bottom: Math.round(r.bottom),
+      right: Math.round(r.right),
       height: Math.round(r.height),
+      winW: window.innerWidth,
       winH: window.innerHeight,
       overflowsBottom: Math.round(r.bottom - window.innerHeight),
       overflowsTop: Math.round(-r.top),
@@ -1319,8 +1321,12 @@ describe('recent-subreddits sidebar', { skip }, () => {
         );
         // The width clamp uses POPUP_WIDTH, so the rendered box has to match it.
         assert.ok(
-          m.width <= 280,
-          `${c.label} / ${view}: rendered ${m.width}px wide, wider than the 280px the clamp assumes`
+          m.width <= 300,
+          `${c.label} / ${view}: rendered ${m.width}px wide, wider than the 300px the clamp assumes`
+        );
+        assert.ok(
+          m.right <= m.winW - 16,
+          `${c.label} / ${view}: popup extends past the right margin, got ${JSON.stringify(m)}`
         );
       }
 
@@ -1425,7 +1431,7 @@ describe('recent-subreddits sidebar', { skip }, () => {
       const p = document.querySelector(popupSel).getBoundingClientRect();
       return { left: Math.round(p.left), top: Math.round(p.top), winW: innerWidth, winH: innerHeight };
     }, POPUP));
-    assert.ok(Math.abs(geo.left - (geo.winW - 280) / 2) < 2, `hotkey popup should be centred horizontally: ${JSON.stringify(geo)}`);
+    assert.ok(Math.abs(geo.left - (geo.winW - 300) / 2) < 2, `hotkey popup should be centred horizontally: ${JSON.stringify(geo)}`);
     assert.ok(geo.top > 0, `centred popup must be on screen: ${JSON.stringify(geo)}`);
   });
 

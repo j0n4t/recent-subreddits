@@ -305,7 +305,8 @@
 
       display: none;
       position: fixed;
-      min-width: 300px;
+      width: 300px;
+      max-width: calc(100vw - 32px);
       /* Total width, so it matches POPUP_WIDTH in position.js \u2014 the clamp on the
          right edge is computed from that constant. */
       box-sizing: border-box;
@@ -541,6 +542,9 @@
     }
     .rs-target:first-child { border-top: none; }
     .rs-target-sel {
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
       font-family: monospace;
       font-size: 11px;
       color: var(--rs-text);
@@ -1085,7 +1089,7 @@
   }
 
   // src/position.js
-  var POPUP_WIDTH = 280;
+  var POPUP_WIDTH = 300;
   var GAP = 8;
   var MARGIN = 16;
   var MIN_HEIGHT = 120;
@@ -2181,10 +2185,10 @@
     document.addEventListener("click", (e) => {
       const hit = resolveTrigger(e.target);
       if (hit && wantsClick(hit.events)) {
+        e.preventDefault();
         if (isPopupVisible()) {
           togglePopup(false);
         } else {
-          e.preventDefault();
           togglePopup(true, hit.el);
         }
         return;

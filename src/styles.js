@@ -33,7 +33,8 @@ export function injectStyles() {
 
       display: none;
       position: fixed;
-      min-width: 300px;
+      width: 300px;
+      max-width: calc(100vw - 32px);
       /* Total width, so it matches POPUP_WIDTH in position.js — the clamp on the
          right edge is computed from that constant. */
       box-sizing: border-box;
@@ -269,6 +270,9 @@ export function injectStyles() {
     }
     .rs-target:first-child { border-top: none; }
     .rs-target-sel {
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
       font-family: monospace;
       font-size: 11px;
       color: var(--rs-text);
